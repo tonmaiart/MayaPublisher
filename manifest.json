@@ -1,0 +1,9 @@
+{
+  "id": "maya_publisher",
+  "name": "MayaPublisher",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry_point": "plugin.py",
+  "description": "Publishes the active Maya scene (Rig, Model, or Animation, per this repo's configured Publish Mode) into the active repo's connected pipeline publish folder, versioned via PublishApi. Contributes its maya-scripts folder to the Maya Launcher env bridge — does not launch Maya itself.",
+  "requires": ["maya_toolkit", "publish_api"]
+}
