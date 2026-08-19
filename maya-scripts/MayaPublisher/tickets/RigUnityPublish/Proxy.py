@@ -10,7 +10,7 @@ import maya.mel as mel
 
 
 def validate(context):
-    result = Scene.validate_scene(context=context)
+    result = clean_up_scene(context=context)
 
     if result == False:
         return False
