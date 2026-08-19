@@ -39,6 +39,7 @@ class MainWindow(ToolkitWindow):
         self._scripts = []
 
         self.connect_signals()
+        self.populate_repo_info()
         self.populate_categories()
 
     # ------------------------------------------------------------
@@ -47,6 +48,7 @@ class MainWindow(ToolkitWindow):
     def connect_signals(self):
         self.ui.comboBox_tickets_catagory.currentIndexChanged.connect(self.on_category_changed)
         self.ui.pushButton_catagory_config.clicked.connect(self.save_category_config)
+        self.ui.pushButton_RefreshScripts.clicked.connect(self.refresh_ticket_scripts)
         self.ui.pushButton_create_ticket_scripts.clicked.connect(self.create_ticket_script)
         self.ui.pushButton_edit_selected_script.clicked.connect(self.edit_selected_script)
         self.ui.pushButton_open_ticket_dir.clicked.connect(self.open_ticket_dir)
@@ -54,6 +56,17 @@ class MainWindow(ToolkitWindow):
         self.ui.pushButton_publish.clicked.connect(self.publish_button)
         self.ui.pushButton_open_dir.clicked.connect(self.open_publish_dir)
         self.ui.pushButton_take_a_snapshot.clicked.connect(self.take_a_snapshot)
+
+    # ------------------------------------------------------------
+    # REPO INFO
+    # ------------------------------------------------------------
+    def populate_repo_info(self):
+        """label_active_repo_name/label_active_repo_path <- the repo
+        currently active in UkoreHub (unrelated to label_repo_target_name,
+        which reflects the resolved publish destination's own repo)."""
+        repo_name, repo_path = function.get_active_repo_display()
+        self.ui.label_active_repo_name.setText(repo_name or "(no active repo)")
+        self.ui.label_active_repo_path.setText(repo_path or "")
 
     # ------------------------------------------------------------
     # CATEGORY
@@ -120,6 +133,12 @@ class MainWindow(ToolkitWindow):
         item = self.ui.listWidget_ticket.currentItem()
         return item.text() if item else None
 
+    def refresh_ticket_scripts(self):
+        """pushButton_RefreshScripts — rescans tickets/<category>/ off disk,
+        for scripts a teammate added/removed while this window was open."""
+        self.initialize_ticket_list_widget()
+        self.refresh_publish_destination()
+
     def select_script_by_name(self, name):
         for row in range(self.ui.listWidget_ticket.count()):
             if self.ui.listWidget_ticket.item(row).text() == name:
@@ -183,23 +202,26 @@ class MainWindow(ToolkitWindow):
 
         if self._current_category is None or script_name is None:
             self.ui.label_publish_root.setText("Pick a category and a ticket script to see the publish destination.")
-            self.ui.label_job_name.setText("")
-            self.ui.label_version_publish.setText("")
+            self.ui.label_repo_target_name.setText("")
+            self.ui.label_lastest_publish_version.setText("")
+            self.ui.label_next_publish_version.setText("")
             return
 
         try:
-            publish_root = function.get_publish_root_for_category(self._current_category)
+            publish_root, target_repo_name = function.get_publish_root_for_category(self._current_category)
         except RuntimeError as exc:
             self.ui.label_publish_root.setText(str(exc))
-            self.ui.label_job_name.setText("")
-            self.ui.label_version_publish.setText("")
+            self.ui.label_repo_target_name.setText("")
+            self.ui.label_lastest_publish_version.setText("")
+            self.ui.label_next_publish_version.setText("")
             return
 
         self.ui.label_publish_root.setText(publish_root)
-        self.ui.label_job_name.setText(os.path.basename(publish_root))
+        self.ui.label_repo_target_name.setText(target_repo_name)
 
-        next_version = versioning.get_new_version(os.path.join(publish_root, script_name))
-        self.ui.label_version_publish.setText("v{:03d}".format(next_version))
+        latest_version, next_version = function.get_version_info(publish_root, script_name)
+        self.ui.label_lastest_publish_version.setText("v{:03d}".format(latest_version) if latest_version else "—")
+        self.ui.label_next_publish_version.setText("v{:03d}".format(next_version))
 
     def take_a_snapshot(self):
         self.snapshot_path = Pipeline.playblast_screenshot_to_project_folder()
@@ -260,7 +282,7 @@ class MainWindow(ToolkitWindow):
             return
 
         try:
-            publish_root = function.get_publish_root_for_category(self._current_category)
+            publish_root, _target_repo_name = function.get_publish_root_for_category(self._current_category)
         except RuntimeError as exc:
             cmds.confirmDialog(m=str(exc), button=["Ok"])
             return

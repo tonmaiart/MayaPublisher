@@ -39,6 +39,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import os
 from pathlib import Path
 
 import maya.cmds as mc
@@ -168,27 +169,40 @@ def set_default_category(category: str) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def get_publish_root_for_category(category: str) -> str:
-    """The publish destination root for this category — the cloned path of
-    whichever repo (the active one, or one it has a pipeline connection to)
-    declares a Custom Path whose *label* matches `category`
-    (case-insensitive), joined with that Custom Path's own relative path.
-    Checks the active repo's own declared Custom Paths first, then every
-    resolvable pipeline connection, in PublishApi.repo_paths.get_pipeline_refs()
-    order. Raises RuntimeError with an artist-facing message if there's no
-    active repo, or no repo/connection declares a matching Custom Path."""
+def get_active_repo_display() -> tuple[str | None, str | None]:
+    """(repo_name, repo_path) for the active repo in UkoreHub, or
+    (None, None) if nothing's active — for label_active_repo_name/
+    label_active_repo_path."""
+    _project, repo, repo_path = repo_paths.get_active_repo()
+    if repo is None:
+        return None, None
+    return repo.name, str(repo_path)
+
+
+def get_publish_root_for_category(category: str) -> tuple[str, str]:
+    """(publish_root, target_repo_name) for this category — publish_root is
+    the cloned path of whichever repo (the active one, or one it has a
+    pipeline connection to) declares a Custom Path whose *label* matches
+    `category` (case-insensitive), joined with that Custom Path's own
+    relative path; target_repo_name is that same repo's name (for
+    label_repo_target_name — may differ from the active repo when the match
+    comes from a pipeline connection). Checks the active repo's own declared
+    Custom Paths first, then every resolvable pipeline connection, in
+    PublishApi.repo_paths.get_pipeline_refs() order. Raises RuntimeError with
+    an artist-facing message if there's no active repo, or no repo/
+    connection declares a matching Custom Path."""
     project, repo, repo_path = repo_paths.get_active_repo()
     if project is None:
         raise RuntimeError("No active repo selected in UkoreHub. Open UkoreHub, pick a project/repo, then try again.")
 
-    candidates = [(project.id, repo.id, repo_path)]
+    candidates = [(project.id, repo.id, repo_path, repo.name)]
     for ref in repo_paths.get_pipeline_refs():
         resolved = repo_paths.resolve_ref(ref)
         if resolved is not None:
             ref_project, ref_repo, ref_repo_path = resolved
-            candidates.append((ref_project.id, ref_repo.id, ref_repo_path))
+            candidates.append((ref_project.id, ref_repo.id, ref_repo_path, ref_repo.name))
 
-    for target_project_id, target_repo_id, target_repo_path in candidates:
+    for target_project_id, target_repo_id, target_repo_path, target_repo_name in candidates:
         for custom_path in repo_paths.get_custom_paths(target_project_id, target_repo_id):
             if custom_path.get("label", "").strip().lower() == category.strip().lower():
                 if not target_repo_path.is_dir():
@@ -196,12 +210,21 @@ def get_publish_root_for_category(category: str) -> str:
                         f"Publish Path target repo for category '{category}' hasn't been cloned yet — "
                         "clone it in UkoreHub first."
                     )
-                return str(target_repo_path / custom_path["path"].lstrip("/\\"))
+                return str(target_repo_path / custom_path["path"].lstrip("/\\")), target_repo_name
 
     raise RuntimeError(
         f"No Custom Path named '{category}' found on this repo or its pipeline connections. "
         "Ask a studio admin to declare one in Project Editor."
     )
+
+
+def get_version_info(publish_root: str, script_name: str) -> tuple[int | None, int]:
+    """(latest_version, next_version) for this ticket script's own publish
+    subfolder — latest_version is None if nothing's been published there
+    yet, for label_lastest_publish_version/label_next_publish_version."""
+    next_version = versioning.get_new_version(os.path.join(publish_root, script_name))
+    latest_version = next_version - 1 if next_version > 1 else None
+    return latest_version, next_version
 
 
 def run_ticket_script(category: str, script_name: str, context: dict) -> tuple[bool, str]:
@@ -252,7 +275,7 @@ def publish(category: str, script_name: str):
     if not scene_path:
         raise RuntimeError("กรุณาบันทึกไฟล์ก่อนดำเนินการ Publish!")
 
-    publish_root = get_publish_root_for_category(category)
+    publish_root, _target_repo_name = get_publish_root_for_category(category)
     version_dir, version = versioning.get_version_directory(publish_root, script_name)
 
     context = {

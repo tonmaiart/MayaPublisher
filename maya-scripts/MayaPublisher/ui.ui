@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>352</width>
-    <height>755</height>
+    <width>515</width>
+    <height>824</height>
    </rect>
   </property>
   <property name="font">
@@ -41,6 +41,20 @@
       <layout class="QGridLayout" name="gridLayout_dest">
        <item row="1" column="0">
         <layout class="QVBoxLayout" name="verticalLayout_2">
+         <item>
+          <widget class="QLabel" name="label_active_repo_path">
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_active_repo_name">
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
          <item>
           <widget class="QLabel" name="label_publish_root">
            <property name="font">
@@ -128,6 +142,13 @@ QListWidget::item:selected {
        <item row="1" column="0">
         <layout class="QHBoxLayout" name="horizontalLayout_2">
          <item>
+          <widget class="QPushButton" name="pushButton_RefreshScripts">
+           <property name="text">
+            <string>Refresh Scripts</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QPushButton" name="pushButton_create_ticket_scripts">
            <property name="text">
             <string>New Scripts...</string>
@@ -171,7 +192,67 @@ QListWidget::item:selected {
        <item row="0" column="0">
         <widget class="QWidget" name="widget" native="true">
          <layout class="QGridLayout" name="gridLayout_3">
-          <item row="0" column="0">
+          <item row="3" column="1">
+           <widget class="QLabel" name="label_version_current_7">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>50</weight>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color:white</string>
+            </property>
+            <property name="text">
+             <string>Directory</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLabel" name="label_version_current_3">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>50</weight>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color:white</string>
+            </property>
+            <property name="text">
+             <string>Next Publish ver</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <widget class="QLabel" name="label_repo_target_name">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>75</weight>
+              <bold>true</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color:rgb(255, 221, 84)</string>
+            </property>
+            <property name="text">
+             <string>0</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="0" rowspan="5">
            <widget class="QPushButton" name="pushButton_take_a_snapshot">
             <property name="minimumSize">
              <size>
@@ -218,104 +299,62 @@ QPushButton:pressed {
            </widget>
           </item>
           <item row="0" column="1">
-           <layout class="QGridLayout" name="gridLayout_6">
-            <item row="0" column="0">
-             <widget class="QLabel" name="label_version_current_4">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>50</weight>
-                <bold>false</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:white</string>
-              </property>
-              <property name="text">
-               <string>Repo :</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item row="0" column="2">
-             <widget class="QLabel" name="label_job_name">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>75</weight>
-                <bold>true</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:rgb(255, 221, 84)</string>
-              </property>
-              <property name="text">
-               <string>0</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item row="1" column="0">
-             <widget class="QLabel" name="label_version_current_3">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>50</weight>
-                <bold>false</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:white</string>
-              </property>
-              <property name="text">
-               <string>Publish ver</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item row="1" column="2">
-             <widget class="QLabel" name="label_version_publish">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>75</weight>
-                <bold>true</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:rgb(255, 221, 84)</string>
-              </property>
-              <property name="text">
-               <string>0</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item row="2" column="2">
-             <widget class="QPushButton" name="pushButton_open_dir">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
-                <horstretch>0</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="font">
-               <font>
-                <pointsize>12</pointsize>
-                <weight>75</weight>
-                <bold>true</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">QPushButton {
+           <widget class="QLabel" name="label_version_current_4">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>50</weight>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color:white</string>
+            </property>
+            <property name="text">
+             <string>Repo :</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="2">
+           <widget class="QLabel" name="label_next_publish_version">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>75</weight>
+              <bold>true</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color:rgb(255, 221, 84)</string>
+            </property>
+            <property name="text">
+             <string>0</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="2">
+           <widget class="QPushButton" name="pushButton_open_dir">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="font">
+             <font>
+              <pointsize>12</pointsize>
+              <weight>75</weight>
+              <bold>true</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton {
     color: black;
     background: qlineargradient(spread:pad, x1:0, y1:0, x2:0, y2:1, stop:0 rgba(185, 185, 185, 255), stop:1 rgba(129, 129, 129, 255));
     border: 1px solid rgba(255, 255, 255, 0.5);
@@ -333,33 +372,38 @@ QPushButton:pressed {
         background: qlineargradient(spread:pad, x1:0, y1:1, x2:0, y2:0, stop:0 rgba(189, 123, 69, 255), stop:1 rgba(134, 88, 50, 255));
 }
 </string>
-              </property>
-              <property name="text">
-               <string>📁</string>
-              </property>
-             </widget>
-            </item>
-            <item row="2" column="0">
-             <widget class="QLabel" name="label_version_current_7">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>50</weight>
-                <bold>false</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:white</string>
-              </property>
-              <property name="text">
-               <string>Directory</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-           </layout>
+            </property>
+            <property name="text">
+             <string>📁</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLabel" name="label_version_current_5">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>50</weight>
+              <bold>false</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">color:white</string>
+            </property>
+            <property name="text">
+             <string>Lastest Publish Version</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="2">
+           <widget class="QLabel" name="label_lastest_publish_version">
+            <property name="text">
+             <string>TextLabel</string>
+            </property>
+           </widget>
           </item>
          </layout>
         </widget>

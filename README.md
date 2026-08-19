@@ -88,23 +88,37 @@ the Maya-side window.
   `script_path()`: read `tickets/` straight off disk. `create_ticket_script()`:
   seeds a new Ticket Script from `_TICKET_SCRIPT_TEMPLATE`.
   `get_default_category()`/`set_default_category()`: this repo's
-  `.MayaPublisher` file. `get_publish_root_for_category()`: Custom Path
-  label match (see above). `run_ticket_script()`: same
-  `importlib.util.spec_from_file_location`/`exec_module` dispatch
-  `PublishApi.tickets.run_validation_scripts` uses, just pointed at
-  `tickets/<category>/<script_name>.py` instead of a repo's own
-  `PublishValidation/<tool_id>/`. `publish(category, script_name)`:
-  resolves the publish root/next version via `PublishApi`, builds a
-  `context` dict (`version_dir`, `version`, `category`, `script_name`,
-  `tool_id`), then runs the selected Ticket Script with that context —
-  **that script decides what to export/copy into `context["version_dir"]`**,
-  not this function (see "Publish is a scripted step" below).
+  `.MayaPublisher` file. `get_active_repo_display()`: `(repo_name,
+  repo_path)` for the UkoreHub-active repo, or `(None, None)` — feeds
+  `label_active_repo_name`/`label_active_repo_path`.
+  `get_publish_root_for_category()`: Custom Path label match (see above),
+  returns `(publish_root, target_repo_name)` — `target_repo_name` feeds
+  `label_repo_target_name` and can differ from the active repo when the
+  match comes from a pipeline connection. `get_version_info()`:
+  `(latest_version, next_version)` for a category+ticket's own publish
+  subfolder (`latest_version` is `None` if nothing's published there yet)
+  — feeds `label_lastest_publish_version`/`label_next_publish_version`.
+  `run_ticket_script()`: same `importlib.util.spec_from_file_location`/
+  `exec_module` dispatch `PublishApi.tickets.run_validation_scripts` uses,
+  just pointed at `tickets/<category>/<script_name>.py` instead of a
+  repo's own `PublishValidation/<tool_id>/`. `publish(category,
+  script_name)`: resolves the publish root/next version via `PublishApi`,
+  builds a `context` dict (`version_dir`, `version`, `category`,
+  `script_name`, `tool_id`), then runs the selected Ticket Script with
+  that context — **that script decides what to export/copy into
+  `context["version_dir"]`**, not this function (see "Publish is a
+  scripted step" below).
 - `maya-scripts/MayaPublisher/interface.py` — `MainWindow`
   (`tmlib.ui.interface_template.ToolkitWindow`): category combobox +
-  ticket-script list + snapshot/publish/open-folder buttons. Window title
-  `"MayaPublisher — {Category}"` once a category is picked. No "Manage
-  Tickets..." button anymore — that whole dialog/workflow is retired for
-  this plugin.
+  ticket-script list + snapshot/publish/open-folder buttons, plus a
+  read-only info block (`populate_repo_info()`/`refresh_publish_destination()`)
+  showing the active repo, resolved publish root/target repo, and
+  latest/next version. `pushButton_RefreshScripts` (`refresh_ticket_scripts()`)
+  rescans `tickets/<category>/` off disk without switching category, for a
+  Ticket Script a teammate added/removed while the window was already
+  open. Window title `"MayaPublisher — {Category}"` once a category is
+  picked. No "Manage Tickets..." button anymore — that whole dialog/
+  workflow is retired for this plugin.
 - `maya-scripts/MayaPublisher/tickets/` — bundled Ticket Scripts, one
   subfolder per category (`Rig/`, `Anim/`, `Model/`, ...), each holding
   that category's `.py` Ticket Scripts. Committed to this plugin's own git
@@ -113,11 +127,15 @@ the Maya-side window.
   clone is pulled.
 - `maya-scripts/MayaPublisher/ui.ui` — Qt Designer layout. Key widgets:
   `comboBox_tickets_catagory` + `pushButton_catagory_config` (category
-  picker/save), `listWidget_ticket` + `pushButton_create_ticket_scripts` /
-  `pushButton_edit_selected_script` / `pushButton_open_ticket_dir`
-  ("Choose Ticket Scripts" group), plus the pre-existing publish/snapshot/
-  open-dir controls. Loaded via
-  `importlib.import_module("MayaPublisher")` + `__path__[0]/ui.ui`.
+  picker/save); `listWidget_ticket` + `pushButton_RefreshScripts` /
+  `pushButton_create_ticket_scripts` / `pushButton_edit_selected_script` /
+  `pushButton_open_ticket_dir` ("Choose Ticket Scripts" group); the
+  "Publish Metadata"/"Publish Info" read-only labels
+  (`label_active_repo_name`, `label_active_repo_path`, `label_publish_root`,
+  `label_repo_target_name`, `label_lastest_publish_version`,
+  `label_next_publish_version`); plus the pre-existing publish/snapshot/
+  open-dir controls. Loaded via `importlib.import_module("MayaPublisher")`
+  + `__path__[0]/ui.ui`.
 
 ## Publish is a scripted step
 
