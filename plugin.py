@@ -31,3 +31,17 @@ def register(api) -> None:
     labels = bridge.get("labels", {})
     labels[TOOL_ID] = TOOL_LABEL
     bridge.set("labels", labels)
+
+    # Auto-import MayaPublisher right after Maya opens a file so its
+    # UkoreMenu.register_item() call (maya-scripts/MayaPublisher/__init__.py)
+    # runs before UkoreMenu itself rebuilds the menu (order 99) — same
+    # convention as UkoreReferenceEditor/plugin.py. Without this, the "Maya
+    # Publisher..." menu item wouldn't appear until something else happened
+    # to import MayaPublisher first (the bug UkoreMenu's README documents
+    # historically affecting MayaFileBrowser).
+    hooks = bridge.get("launch_hooks", {})
+    hooks[TOOL_ID] = {
+        "order": 10,
+        "post_open_mel": 'python("try:\\n    import MayaPublisher\\nexcept ImportError:\\n    pass");',
+    }
+    bridge.set("launch_hooks", hooks)
