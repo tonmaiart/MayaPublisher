@@ -177,6 +177,14 @@ def bake_and_detach_skeleton():
         cmds.cutKey(joint, attribute="visibility", clear=True)
         cmds.setAttr(f"{joint}.visibility", True)
 
+    # Unity ignores segmentScaleCompensate and misreads scaled joint chains
+    # without this off, so disable it on every joint here — must happen
+    # before _move_to_world() below, which changes every joint's full path
+    # and would make list_joint's cached paths stale
+    for joint in list_joint:
+        if cmds.attributeQuery("segmentScaleCompensate", node=joint, exists=True):
+            cmds.setAttr(f"{joint}.segmentScaleCompensate", False)
+
     # move each skeleton's root joint (no joint parent within the set) to world
     list_root_joint = []
     for joint in list_joint:
