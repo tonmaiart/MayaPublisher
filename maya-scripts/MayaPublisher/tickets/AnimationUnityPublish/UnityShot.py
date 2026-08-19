@@ -20,30 +20,19 @@ script:
     }
 """
 
-import maya.cmds as cmds
-
 import os
-from UkoreMaya.core import Logic,Pipeline,AnimationExporter
-from UkoreMaya.menu import General
 
-from tmlib.core import Validate,File,Scene
+import maya.cmds as cmds
 import maya.mel as mel
 
+from UkoreMaya.core import Pipeline
+from UkoreMaya.menu import General
+
+from tmlib.core import Validate, Utility
 
 
 def validate(context):
-        # Example — copy the current scene as a Maya Ascii file into this
-    # publish's version folder. Replace with whatever this ticket script
-    # actually needs to check and/or export, or remove the context
-    # argument entirely for a check-only script.
-    #
-    # version = context["version"]
-    # script_name = context["script_name"]
-    # ma_path = os.path.join(context["version_dir"], f"{script_name}_v{version:03d}.ma")
-    # Pipeline.export_maya_common(export_file_path=ma_path)
-
-
-    result = export_shot_to_unity(
+    return export_shot_to_unity(
         export_path=context["version_dir"],
         prefix_seperate=True,
         smooth_mesh=True,
@@ -56,10 +45,9 @@ def validate(context):
         pick_character=["Kafka"],
     )
 
-    return False
 
 def export_shot_to_unity(
-    export_path=None,
+    export_path,
     prefix_seperate=True,
     smooth_mesh=True,
     version="",
@@ -71,7 +59,7 @@ def export_shot_to_unity(
     pick_character=["Kafka"],
 ):
 
-    print("# Export Shot to UE #")
+    print("# Export Shot to Unity #")
     print("- Export Path : ", export_path)
     print("- Prefix Seperate : ", prefix_seperate)
     print("- Smooth Mesh : ", smooth_mesh)
@@ -82,13 +70,7 @@ def export_shot_to_unity(
     print("- Pick Character Enable : ", pick_character_enable)
     print("- Pick Character : ", pick_character)
 
-    # verify path
-    if os.path.isdir(export_path):
-        os.makedirs(export_path, exist_ok=True)
-    else:
-        os.makedirs(os.path.dirname(export_path), exist_ok=True)
-
-    # get current file path
+    # shot name prefix, taken from the current scene's parent folder name
     current_file_path = cmds.file(sn=True, q=1)
     current_file_dir_name = os.path.basename(os.path.dirname(current_file_path))
 
@@ -103,19 +85,17 @@ def export_shot_to_unity(
             Validate.fix_material_names(selection=geos)
             Validate.validate_material_face_set(selection=geos)
 
-    # export anim abc , camera and head locator
+    # export anim fbx and camera
     if export_anim:
-        export_anim_abc(
+        export_anim_fbx(
             export_path,
             prefix_seperate=prefix_seperate,
             smooth_mesh=smooth_mesh,
             pick_character_enable=pick_character_enable,
             pick_character=pick_character,
+            version=version,
             prefix_shot=current_file_dir_name,
         )
-
-    if not os.path.isdir(export_path):
-        export_path = os.path.dirname(export_path)
 
     if export_camera:
         export_anim_camera(
@@ -124,88 +104,104 @@ def export_shot_to_unity(
             )
         )
 
-    return export_path
+    return True
 
 
 def export_anim_fbx(
-    export_folder,
-    pick_character=["Kafka"]):
+    export_path,
+    prefix_seperate=True,
+    smooth_mesh=False,
+    pick_character_enable=False,
+    pick_character=["Kafka"],
+    version="",
+    prefix_shot="",
+):
     """
-    Use to Export Animation to fbx
+    Export animated character meshes to per-character FBX files.
 
-    pick_character : if False , will select all character , if list ["Kafka","Jacob"] ia mean pick kafka and jacob
-    version : if have number input the name will be version
-    
-    Output example
-    KBA030_Kafka_anim.fbx
-    KBA030_Jacob_anim.fbx
-    KBA030_Jacob_camera.fbx
-
+    This will automatically detect and export each character separately
+    - only detects mesh that have suffix "_Geo"
+    - separates character based on prefix name like "Kafka_Eye_Geo" into file Kafka
     """
 
-    print("# Exporting Animation Fbx #")
-    # make sure the export path is directory
-    # check is export path is directory
-    if not os.path.isdir(export_folder):
-        export_folder = os.path.dirname(export_folder)
+    print("# Exporting Anim Fbx #")
 
-    # ===================================================
-    # get mesh dict , seperated by character prefix name
-    # ===================================================
-
-    dict_mesh = Pipeline.get_character_meshes(
-        pick_character_enable=False, pick_character=pick_character
-    )
+    if prefix_seperate:
+        dict_mesh = Pipeline.get_character_meshes(
+            pick_character_enable=pick_character_enable, pick_character=pick_character
+        )
+    else:
+        dict_mesh = {"anim": Pipeline.list_meshes_with_suffix_geo()}
 
     for key in dict_mesh.keys():
-        print("Anim Alembic Character : ", key)
+        print("Anim Fbx Character : ", key)
 
         for mesh in dict_mesh[key]:
             print("- ", Utility.cut(mesh))
 
-    # =======================
-    # iterate for each character
-    # =======================
+    # FBX export settings (shared for every character)
+    mel.eval('FBXExportSmoothingGroups -v true')
+    mel.eval('FBXExportHardEdges -v false')
+    mel.eval('FBXExportTangents -v false')
+    mel.eval('FBXExportSmoothMesh -v false')
+    mel.eval('FBXExportInstances -v false')
+    mel.eval('FBXExportBakeComplexAnimation -v true')
+    mel.eval('FBXExportSkeletonDefinitions -v true')
+    mel.eval('FBXExportSkins -v true')
+    mel.eval('FBXExportShapes -v true')  # blendshapes
+    mel.eval('FBXExportConstraints -v false')
+    mel.eval('FBXExportCameras -v false')
+    mel.eval('FBXExportLights -v false')
+    mel.eval('FBXExportEmbeddedTextures -v false')
+    mel.eval('FBXExportInputConnections -v false')
+    mel.eval('FBXExportUpAxis y')
 
     for key in dict_mesh.keys():
         list_mesh_anim = dict_mesh[key]
-        root_flags = " ".join(f"-root {obj}" for obj in list_mesh_anim)
-        start_frame = cmds.playbackOptions(q=True, min=True)
-        end_frame = cmds.playbackOptions(q=True, max=True)
 
-        # generate export name
-        prefix_shot = os.path.basename(cmds.file(q=True, sn=True)).split("_")[0]
-        export_name = f"{prefix_shot}_{key}_anim.fbx"
-        export_fbx_file_path = export_folder + "/" + export_name
-        export_fbx_file_path = export_fbx_file_path.replace("\\", "/")
+        if version:
+            export_name = f"{key}_anim_{version:03}.fbx"
+        else:
+            export_name = f"{key}_anim.fbx"
 
-        print("fbx export path : ",export_fbx_file_path)
-        # FBX export settings
-        mel.eval('FBXExportSmoothingGroups -v true')
-        mel.eval('FBXExportHardEdges -v false')
-        mel.eval('FBXExportTangents -v false')
-        mel.eval('FBXExportSmoothMesh -v false')
-        mel.eval('FBXExportInstances -v false')
-        mel.eval('FBXExportBakeComplexAnimation -v true')
-        mel.eval('FBXExportSkeletonDefinitions -v true')
-        mel.eval('FBXExportSkins -v true')
-        mel.eval('FBXExportShapes -v true')  # blendshapes
-        mel.eval('FBXExportConstraints -v false')
-        mel.eval('FBXExportCameras -v false')
-        mel.eval('FBXExportLights -v false')
-        mel.eval('FBXExportEmbeddedTextures -v false')
-        mel.eval('FBXExportInputConnections -v false')
-        mel.eval('FBXExportUpAxis y')
+        if prefix_shot:
+            export_name = prefix_shot + "_" + export_name
 
+        export_fbx_file_path = os.path.join(export_path, export_name).replace("\\", "/")
+
+        # add smooth node
+        list_smooth_node = []
+
+        if smooth_mesh:
+            for mesh in list_mesh_anim:
+                shape_node = Utility.cut(mesh) + "Shape"
+
+                if not cmds.objExists(shape_node):
+                    print("Not found shape node for smooth: ", shape_node)
+                    continue
+
+                get_smooth_level = cmds.getAttr(f"{shape_node}.smoothLevel")
+
+                if get_smooth_level != 0:
+                    cmds.select(mesh)
+                    node = cmds.polySmooth()[0]
+                    cmds.setAttr(node + ".divisions", get_smooth_level)
+                    list_smooth_node.append(node)
+
+                    print(f"Add smooth node : {node} to {mesh}")
 
         cmds.select(clear=True)
-        cmds.select("*:DeformSet",add=True)
+        cmds.select("*:DeformSet", add=True)
         General.sort_by_type(typ="joint")
+        cmds.select(list_mesh_anim, add=True)
 
-        cmds.select(list_mesh_anim,add=True)
-        # Export selected
+        print("fbx export path : ", export_fbx_file_path)
         mel.eval(f'FBXExport -f "{export_fbx_file_path}" -s')
         print(f"Exported: {export_fbx_file_path}")
+
+        # remove smooth node
+        for node in list_smooth_node:
+            cmds.delete(node)
 
 
 def export_anim_camera(export_fbx_path):
