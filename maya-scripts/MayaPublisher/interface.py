@@ -184,7 +184,6 @@ class MainWindow(ToolkitWindow):
         if self._current_category is None or script_name is None:
             self.ui.label_publish_root.setText("Pick a category and a ticket script to see the publish destination.")
             self.ui.label_job_name.setText("")
-            self.ui.label_job_task.setText("")
             self.ui.label_version_publish.setText("")
             return
 
@@ -193,13 +192,11 @@ class MainWindow(ToolkitWindow):
         except RuntimeError as exc:
             self.ui.label_publish_root.setText(str(exc))
             self.ui.label_job_name.setText("")
-            self.ui.label_job_task.setText(script_name)
             self.ui.label_version_publish.setText("")
             return
 
         self.ui.label_publish_root.setText(publish_root)
         self.ui.label_job_name.setText(os.path.basename(publish_root))
-        self.ui.label_job_task.setText(script_name)
 
         next_version = versioning.get_new_version(os.path.join(publish_root, script_name))
         self.ui.label_version_publish.setText("v{:03d}".format(next_version))
