@@ -1,5 +1,18 @@
 # plugins/repo_internal/MayaPublisher/
 
+**2026-08-19: per-asset/shot block-name subfolder.** `publish()` now
+creates an extra subfolder between the ticket script's own folder and its
+version folder, named after the active scene's filename's first
+`_`-separated "block" (`function.get_scene_block_name()`, e.g.
+`KBA030_rig_v012.ma` -> `KBA030`) — so a publish now lands at
+`<publish_root>/<script_name>/<block_name>/vXXX` instead of
+`<publish_root>/<script_name>/vXXX`. `get_scene_block_name()` raises the
+same artist-facing error the tool already raised for an unsaved scene
+(`publish()` has always refused to run against an unsaved scene — this
+just also covers a filename with no usable block name), so Publish is
+still refused outright whenever the current scene has no name / hasn't
+been saved.
+
 Maya-side tool that resolves/versions a publish destination for the
 active scene — merges what used to be three separate, near-identical
 plugins (`RigPublisher`, `ModelPublisher`, `AnimationPublisher`, each
@@ -94,20 +107,25 @@ the Maya-side window.
   `get_publish_root_for_category()`: Custom Path label match (see above),
   returns `(publish_root, target_repo_name)` — `target_repo_name` feeds
   `label_repo_target_name` and can differ from the active repo when the
-  match comes from a pipeline connection. `get_version_info()`:
-  `(latest_version, next_version)` for a category+ticket's own publish
-  subfolder (`latest_version` is `None` if nothing's published there yet)
-  — feeds `label_lastest_publish_version`/`label_next_publish_version`.
+  match comes from a pipeline connection. `get_scene_block_name()`: first
+  `_`-separated block of the active scene's filename (no extension), e.g.
+  `KBA030_rig_v012.ma` -> `KBA030` — raises the same artist-facing
+  RuntimeError as an unsaved scene if there's no usable block name.
+  `get_version_info()`: `(latest_version, next_version)` for a
+  category+ticket+block's own publish subfolder (`latest_version` is
+  `None` if nothing's published there yet) — feeds
+  `label_lastest_publish_version`/`label_next_publish_version`.
   `run_ticket_script()`: same `importlib.util.spec_from_file_location`/
   `exec_module` dispatch `PublishApi.tickets.run_validation_scripts` uses,
   just pointed at `tickets/<category>/<script_name>.py` instead of a
   repo's own `PublishValidation/<tool_id>/`. `publish(category,
-  script_name)`: resolves the publish root/next version via `PublishApi`,
-  builds a `context` dict (`version_dir`, `version`, `category`,
-  `script_name`, `tool_id`), then runs the selected Ticket Script with
-  that context — **that script decides what to export/copy into
-  `context["version_dir"]`**, not this function (see "Publish is a
-  scripted step" below).
+  script_name)`: resolves the scene's block name, the publish root, and
+  the next version via `PublishApi` (creating
+  `<publish_root>/<script_name>/<block_name>/vXXX`), builds a `context`
+  dict (`version_dir`, `version`, `category`, `script_name`, `tool_id`),
+  then runs the selected Ticket Script with that context — **that script
+  decides what to export/copy into `context["version_dir"]`**, not this
+  function (see "Publish is a scripted step" below).
 - `maya-scripts/MayaPublisher/interface.py` — `MainWindow`
   (`tmlib.ui.interface_template.ToolkitWindow`): category combobox +
   ticket-script list + snapshot/publish/open-folder buttons, plus a

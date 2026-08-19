@@ -32,7 +32,18 @@ tool_id). A script decides entirely for itself what to export/copy into
 context["version_dir"], using UkoreMaya.core.Pipeline's export functions
 directly if it wants to, or anything else. A Ticket Script with no
 validate() defined, or one that does no file work, produces an **empty**
-version folder — there is no default export."""
+version folder — there is no default export.
+
+**2026-08-19: per-asset/shot block-name subfolder.** publish() now inserts
+an extra subfolder between the ticket script's own folder and its version
+folder, named after the active scene's filename's first "_"-separated
+block (get_scene_block_name(), e.g. "KBA030_rig_v012.ma" -> "KBA030") — so
+the on-disk layout is `<publish_root>/<script_name>/<block_name>/vXXX`
+instead of `<publish_root>/<script_name>/vXXX`. get_scene_block_name()
+raises the same artist-facing RuntimeError publish() already raised for an
+unsaved scene (now also covering a filename that yields no usable block
+name), so Publish is refused outright when the current scene has never
+been saved."""
 
 from __future__ import annotations
 
@@ -179,6 +190,23 @@ def get_active_repo_display() -> tuple[str | None, str | None]:
     return repo.name, str(repo_path)
 
 
+def get_scene_block_name() -> str:
+    """First "_"-separated block of the active scene's filename (no
+    extension), e.g. "KBA030_rig_v012.ma" -> "KBA030" — becomes the
+    per-asset/shot subfolder created under the ticket script's own
+    folder, right before the version folder. Raises RuntimeError (meant to
+    be shown directly to the artist) if the scene hasn't been saved yet, or
+    its filename doesn't yield a usable block name."""
+    scene_path = mc.file(q=True, sn=True)
+    if not scene_path:
+        raise RuntimeError("กรุณาบันทึกไฟล์ก่อนดำเนินการ Publish!")
+
+    block_name = os.path.splitext(os.path.basename(scene_path))[0].split("_")[0].strip()
+    if not block_name:
+        raise RuntimeError("ไม่สามารถระบุชื่อโฟลเดอร์ Publish จากชื่อไฟล์ปัจจุบันได้ กรุณาตรวจสอบชื่อไฟล์!")
+    return block_name
+
+
 def get_publish_root_for_category(category: str) -> tuple[str, str]:
     """(publish_root, target_repo_name) for this category — publish_root is
     the cloned path of whichever repo (the active one, or one it has a
@@ -218,11 +246,12 @@ def get_publish_root_for_category(category: str) -> tuple[str, str]:
     )
 
 
-def get_version_info(publish_root: str, script_name: str) -> tuple[int | None, int]:
-    """(latest_version, next_version) for this ticket script's own publish
-    subfolder — latest_version is None if nothing's been published there
-    yet, for label_lastest_publish_version/label_next_publish_version."""
-    next_version = versioning.get_new_version(os.path.join(publish_root, script_name))
+def get_version_info(publish_root: str, script_name: str, block_name: str) -> tuple[int | None, int]:
+    """(latest_version, next_version) for this ticket script + block
+    (asset/shot code)'s own publish subfolder — latest_version is None if
+    nothing's been published there yet, for
+    label_lastest_publish_version/label_next_publish_version."""
+    next_version = versioning.get_new_version(os.path.join(publish_root, script_name, block_name))
     latest_version = next_version - 1 if next_version > 1 else None
     return latest_version, next_version
 
@@ -268,15 +297,13 @@ def publish(category: str, script_name: str):
     (version_dir, version, category, script_name, tool_id) so it can
     export/copy whatever it decides belongs there — see the module
     docstring. Raises RuntimeError — meant to be shown directly to the
-    artist — if the scene hasn't been saved, the category's Custom Path
-    can't be resolved, or the Ticket Script blocks the publish (returns
-    False/raises). Returns (version_dir, version_number)."""
-    scene_path = mc.file(q=True, sn=True)
-    if not scene_path:
-        raise RuntimeError("กรุณาบันทึกไฟล์ก่อนดำเนินการ Publish!")
-
+    artist — if the scene hasn't been saved (or its filename yields no
+    usable block name), the category's Custom Path can't be resolved, or
+    the Ticket Script blocks the publish (returns False/raises). Returns
+    (version_dir, version_number)."""
+    block_name = get_scene_block_name()
     publish_root, _target_repo_name = get_publish_root_for_category(category)
-    version_dir, version = versioning.get_version_directory(publish_root, script_name)
+    version_dir, version = versioning.get_version_directory(os.path.join(publish_root, script_name), block_name)
 
     context = {
         "version_dir": version_dir,

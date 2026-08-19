@@ -28,14 +28,19 @@ import maya.mel as mel
 from UkoreMaya.core import Pipeline
 from UkoreMaya.menu import General
 
-from tmlib.core import Validate, Utility
+from tmlib.core import Validate, Utility, Connection, Scene
+
+
+def clean_up_scene():
+    Scene.import_all_references()
+    Scene.remove_all_namespaces()
 
 
 def validate(context):
+    clean_up_scene()
     return export_shot_to_unity(
         export_path=context["version_dir"],
         prefix_seperate=True,
-        smooth_mesh=True,
         version=context["version"],
         validate_material=True,
         export_anim=True,
@@ -49,7 +54,6 @@ def validate(context):
 def export_shot_to_unity(
     export_path,
     prefix_seperate=True,
-    smooth_mesh=True,
     version="",
     validate_material=True,
     export_anim=True,
@@ -62,7 +66,6 @@ def export_shot_to_unity(
     print("# Export Shot to Unity #")
     print("- Export Path : ", export_path)
     print("- Prefix Seperate : ", prefix_seperate)
-    print("- Smooth Mesh : ", smooth_mesh)
     print("- Validate Material : ", validate_material)
     print("- Export Anim : ", export_anim)
     print("- Export Camera : ", export_camera)
@@ -90,7 +93,6 @@ def export_shot_to_unity(
         export_anim_fbx(
             export_path,
             prefix_seperate=prefix_seperate,
-            smooth_mesh=smooth_mesh,
             pick_character_enable=pick_character_enable,
             pick_character=pick_character,
             version=version,
@@ -107,24 +109,105 @@ def export_shot_to_unity(
     return True
 
 
+def _move_to_world(list_node):
+    """Reparent each given transform to world, skipping ones already there."""
+
+    for node in list_node:
+        if cmds.listRelatives(node, parent=True, fullPath=True):
+            cmds.parent(node, world=True)
+
+
+def _remove_non_joint_descendants(root_joint):
+    """Recheck root_joint's whole hierarchy and delete any node under it
+    that isn't a joint (e.g. a leftover locator), so only the joint chain
+    remains for FBX export. Cameras are spared — a shot cam (e.g. "camshot")
+    is sometimes parented directly under a joint (handheld/POV setups), and
+    export_anim_camera() still needs to find it after this runs."""
+
+    descendants = (
+        cmds.listRelatives(root_joint, allDescendents=True, fullPath=True, type="transform")
+        or []
+    )
+
+    for node in descendants:
+        if not cmds.objExists(node) or cmds.objectType(node, isa="joint"):
+            continue
+        if cmds.listRelatives(node, shapes=True, type="camera"):
+            continue
+        cmds.delete(node)
+
+
+def bake_and_detach_skeleton():
+    """
+    Bake the shot's skeleton animation onto its joints, break every
+    remaining incoming connection driving them (constraints, rig controls),
+    clear any visibility keyframes and force every joint's visibility on,
+    strip any non-joint node left under a root joint, then move each
+    skeleton root joint to world — same treatment
+    RigUnityPublish/UnityRigSetup.py's bake_and_detach_skeleton() applies,
+    just with no mesh involved (this ticket exports skeleton only).
+    """
+
+    start_frame = cmds.playbackOptions(q=True, min=True)
+    end_frame = cmds.playbackOptions(q=True, max=True)
+
+    cmds.select(clear=True)
+    cmds.select("DeformSet", add=True)
+    General.sort_by_type(typ="joint")
+    list_joint = cmds.ls(sl=True, long=True) or []
+
+    if not list_joint:
+        cmds.warning("Not found any joint in DeformSet")
+        return
+
+    cmds.bakeResults(
+        list_joint,
+        simulation=True,
+        t=(start_frame, end_frame),
+        sampleBy=1,
+        disableImplicitControl=True,
+        preserveOutsideKeys=True,
+    )
+
+    # only break the visibility connection here — breaking rot/pos/scl too
+    # would also disconnect the animCurves bakeResults just created above,
+    # wiping out the baked animation
+    for joint in list_joint:
+        Connection.break_connection_transform(joint, rot=False, pos=False, scl=False, v=True)
+        cmds.cutKey(joint, attribute="visibility", clear=True)
+        cmds.setAttr(f"{joint}.visibility", True)
+
+    # move each skeleton's root joint (no joint parent within the set) to world
+    list_root_joint = []
+    for joint in list_joint:
+        parent = cmds.listRelatives(joint, parent=True, fullPath=True)
+        if not parent or parent[0] not in list_joint:
+            list_root_joint.append(joint)
+
+    for root_joint in list_root_joint:
+        _remove_non_joint_descendants(root_joint)
+
+    _move_to_world(list_root_joint)
+
+
 def export_anim_fbx(
     export_path,
     prefix_seperate=True,
-    smooth_mesh=False,
     pick_character_enable=False,
     pick_character=["Kafka"],
     version="",
     prefix_shot="",
 ):
     """
-    Export animated character meshes to per-character FBX files.
+    Export the shot's baked skeleton to per-character FBX files — no mesh.
 
     This will automatically detect and export each character separately
-    - only detects mesh that have suffix "_Geo"
+    - only detects mesh that have suffix "_Geo" (used for character
+      grouping/naming only — no mesh is exported)
     - separates character based on prefix name like "Kafka_Eye_Geo" into file Kafka
     """
 
-    print("# Exporting Anim Fbx #")
+    print("# Exporting Anim Skeleton Fbx #")
 
     if prefix_seperate:
         dict_mesh = Pipeline.get_character_meshes(
@@ -138,6 +221,8 @@ def export_anim_fbx(
 
         for mesh in dict_mesh[key]:
             print("- ", Utility.cut(mesh))
+
+    bake_and_detach_skeleton()
 
     # FBX export settings (shared for every character)
     mel.eval('FBXExportSmoothingGroups -v true')
@@ -157,8 +242,6 @@ def export_anim_fbx(
     mel.eval('FBXExportUpAxis y')
 
     for key in dict_mesh.keys():
-        list_mesh_anim = dict_mesh[key]
-
         if version:
             export_name = f"{key}_anim_{version:03}.fbx"
         else:
@@ -169,39 +252,13 @@ def export_anim_fbx(
 
         export_fbx_file_path = os.path.join(export_path, export_name).replace("\\", "/")
 
-        # add smooth node
-        list_smooth_node = []
-
-        if smooth_mesh:
-            for mesh in list_mesh_anim:
-                shape_node = Utility.cut(mesh) + "Shape"
-
-                if not cmds.objExists(shape_node):
-                    print("Not found shape node for smooth: ", shape_node)
-                    continue
-
-                get_smooth_level = cmds.getAttr(f"{shape_node}.smoothLevel")
-
-                if get_smooth_level != 0:
-                    cmds.select(mesh)
-                    node = cmds.polySmooth()[0]
-                    cmds.setAttr(node + ".divisions", get_smooth_level)
-                    list_smooth_node.append(node)
-
-                    print(f"Add smooth node : {node} to {mesh}")
-
         cmds.select(clear=True)
-        cmds.select("*:DeformSet", add=True)
+        cmds.select("DeformSet", add=True)
         General.sort_by_type(typ="joint")
-        cmds.select(list_mesh_anim, add=True)
 
         print("fbx export path : ", export_fbx_file_path)
         mel.eval(f'FBXExport -f "{export_fbx_file_path}" -s')
         print(f"Exported: {export_fbx_file_path}")
-
-        # remove smooth node
-        for node in list_smooth_node:
-            cmds.delete(node)
 
 
 def export_anim_camera(export_fbx_path):

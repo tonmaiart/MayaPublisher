@@ -208,6 +208,7 @@ class MainWindow(ToolkitWindow):
             return
 
         try:
+            block_name = function.get_scene_block_name()
             publish_root, target_repo_name = function.get_publish_root_for_category(self._current_category)
         except RuntimeError as exc:
             self.ui.label_publish_root.setText(str(exc))
@@ -216,10 +217,10 @@ class MainWindow(ToolkitWindow):
             self.ui.label_next_publish_version.setText("")
             return
 
-        self.ui.label_publish_root.setText(publish_root)
+        self.ui.label_publish_root.setText(os.path.join(publish_root, script_name, block_name))
         self.ui.label_repo_target_name.setText(target_repo_name)
 
-        latest_version, next_version = function.get_version_info(publish_root, script_name)
+        latest_version, next_version = function.get_version_info(publish_root, script_name, block_name)
         self.ui.label_lastest_publish_version.setText("v{:03d}".format(latest_version) if latest_version else "—")
         self.ui.label_next_publish_version.setText("v{:03d}".format(next_version))
 
@@ -282,11 +283,12 @@ class MainWindow(ToolkitWindow):
             return
 
         try:
+            block_name = function.get_scene_block_name()
             publish_root, _target_repo_name = function.get_publish_root_for_category(self._current_category)
         except RuntimeError as exc:
             cmds.confirmDialog(m=str(exc), button=["Ok"])
             return
 
-        base_dir = os.path.join(publish_root, script_name)
+        base_dir = os.path.join(publish_root, script_name, block_name)
         versioning.make_sure_folder_exist(base_dir)
         os.startfile(base_dir)
