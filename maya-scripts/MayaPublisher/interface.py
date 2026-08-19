@@ -5,25 +5,25 @@
 # This tool created by Natchapon Srisuk, only for Ukore Studio's projects.
 # contact : natchapon.18851@gmail.com
 
-# Merges what used to be three separate tools' own MainWindow
-# (RigPublisher/ModelPublisher/AnimationPublisher's interface.py, which
-# were already ~identical) into one, parameterized by the active repo's
-# configured Publish Mode (Repository Setting > MayaPublisher) instead of
-# each mode having its own plugin/window. Tickets are user-managed
-# (PublishApi.tickets) — each ticket has its own Publish Path and its own
-# validation scripts, managed via the "Manage Tickets..." button below
-# (PublishApi.ticket_manager_dialog).
+# Category (Rig/Anim/Model/...) + "Choose Ticket Scripts" list replace the
+# old repo-wide Publish Mode Setting + PublishApi.tickets.json-managed
+# tickets (2026-08-19) — see function.py's module docstring for the full
+# rationale. Categories are just tickets/ subfolder names
+# (function.list_categories()); this repo's last-picked one is remembered
+# in <repo_root>/.MayaPublisher via pushButton_catagory_config. Each ticket
+# is now a plain .py file (function.list_ticket_scripts()) instead of a
+# JSON-managed ticket dict — no more "Manage Tickets..." dialog.
 # ================================================
 
 import os
 import shutil
+
 from importlib import reload
 
 import maya.cmds as cmds
 from MayaPublisher import function
-from PublishApi import tickets, versioning
-from PublishApi.ticket_manager_dialog import TicketManagerDialog
-from tmlib.module.PySide import QtGui, QtWidgets
+from PublishApi import versioning
+from tmlib.module.PySide import QtGui
 from tmlib.ui.interface_template import ToolkitWindow
 from UkoreMaya.core import Pipeline
 
@@ -35,119 +35,173 @@ class MainWindow(ToolkitWindow):
         super(MainWindow, self).__init__(os.path.basename(os.path.dirname(__file__)))
 
         self.snapshot_path = None
-        self._tickets = []
-        self._mode = function.get_publish_mode()
+        self._current_category = None
+        self._scripts = []
 
-        if self._mode is not None:
-            self.setWindowTitle("MayaPublisher — {}".format(function.MODE_LABELS[self._mode]))
-
-        self._add_manage_tickets_button()
-        self.initialize_ticket_list_widget()
         self.connect_signals()
-        self.refresh_publish_destination()
+        self.populate_categories()
 
     # ------------------------------------------------------------
     # SIGNALS
     # ------------------------------------------------------------
     def connect_signals(self):
+        self.ui.comboBox_tickets_catagory.currentIndexChanged.connect(self.on_category_changed)
+        self.ui.pushButton_catagory_config.clicked.connect(self.save_category_config)
+        self.ui.pushButton_create_ticket_scripts.clicked.connect(self.create_ticket_script)
+        self.ui.pushButton_edit_selected_script.clicked.connect(self.edit_selected_script)
+        self.ui.pushButton_open_ticket_dir.clicked.connect(self.open_ticket_dir)
         self.ui.listWidget_ticket.itemSelectionChanged.connect(self.refresh_publish_destination)
         self.ui.pushButton_publish.clicked.connect(self.publish_button)
         self.ui.pushButton_open_dir.clicked.connect(self.open_publish_dir)
         self.ui.pushButton_take_a_snapshot.clicked.connect(self.take_a_snapshot)
 
-    def _add_manage_tickets_button(self):
-        """Inserted in code rather than in ui.ui — avoids hand-editing the
-        Designer XML for a button this window needs."""
-        self.pushButton_manage_tickets = QtWidgets.QPushButton("Manage Tickets...")
-        self.pushButton_manage_tickets.clicked.connect(self.open_ticket_manager)
-        self.ui.groupBox_ticket.layout().addWidget(self.pushButton_manage_tickets)
+    # ------------------------------------------------------------
+    # CATEGORY
+    # ------------------------------------------------------------
+    def populate_categories(self):
+        """comboBox_tickets_catagory <- tickets/ subfolder names. Restores
+        this repo's saved category (.MayaPublisher) if it's still present
+        on disk, otherwise falls back to the first one found."""
+        categories = function.list_categories()
 
-    def open_ticket_manager(self):
-        if self._mode is None:
-            cmds.confirmDialog(
-                m="This repo has no Publish Mode configured yet. Ask a studio admin to set one "
-                "under Repository Setting > MayaPublisher.",
-                button=["Ok"],
-            )
-            return
+        self.ui.comboBox_tickets_catagory.blockSignals(True)
+        self.ui.comboBox_tickets_catagory.clear()
+        self.ui.comboBox_tickets_catagory.addItems(categories)
 
-        dialog = TicketManagerDialog(
-            self,
-            tool_id=function.TOOL_ID,
-            tool_label="MayaPublisher — {}".format(function.MODE_LABELS[self._mode]),
-            show_export_type=(self._mode == "animation"),
-            scripts_tool_id=function.MODE_TOOL_IDS[self._mode],
+        default_category = function.get_default_category()
+        if default_category in categories:
+            self.ui.comboBox_tickets_catagory.setCurrentText(default_category)
+        self.ui.comboBox_tickets_catagory.blockSignals(False)
+
+        self.on_category_changed()
+
+    def on_category_changed(self, *_args):
+        category = self.ui.comboBox_tickets_catagory.currentText()
+        self._current_category = category or None
+        self.setWindowTitle(
+            "MayaPublisher — {}".format(self._current_category) if self._current_category else "MayaPublisher"
         )
-        dialog.exec_()
         self.initialize_ticket_list_widget()
         self.refresh_publish_destination()
 
+    def save_category_config(self):
+        if self._current_category is None:
+            return
+        try:
+            function.set_default_category(self._current_category)
+        except RuntimeError as exc:
+            cmds.confirmDialog(m=str(exc), button=["Ok"])
+            return
+        cmds.confirmDialog(
+            m="Saved '{}' as this repo's default category.".format(self._current_category), button=["Ok"]
+        )
+
+    # ------------------------------------------------------------
+    # TICKET SCRIPTS
+    # ------------------------------------------------------------
     def initialize_ticket_list_widget(self):
-        """Repopulates from PublishApi.tickets, keeping whichever ticket
-        was selected before (by id) across a Manage Tickets... round trip.
-        Stays empty if this repo has no Publish Mode configured yet — see
-        refresh_publish_destination for the hint shown in that case."""
-        current_id = self.get_current_selected_ticket_id()
-        self._tickets = tickets.list_tickets(function.TOOL_ID) if self._mode is not None else []
+        """Repopulates from function.list_ticket_scripts(), keeping
+        whichever script was selected before (by name) across a category
+        switch/refresh. Stays empty if no category is selected."""
+        current_name = self.get_current_selected_script_name()
+        self._scripts = function.list_ticket_scripts(self._current_category) if self._current_category else []
 
         self.ui.listWidget_ticket.blockSignals(True)
         self.ui.listWidget_ticket.clear()
-        for ticket in self._tickets:
-            self.ui.listWidget_ticket.addItem(ticket["name"])
+        for name in self._scripts:
+            self.ui.listWidget_ticket.addItem(name)
 
-        restore_row = 0
-        for index, ticket in enumerate(self._tickets):
-            if ticket["id"] == current_id:
-                restore_row = index
-                break
-        if self._tickets:
+        if self._scripts:
+            restore_row = self._scripts.index(current_name) if current_name in self._scripts else 0
             self.ui.listWidget_ticket.setCurrentRow(restore_row)
         self.ui.listWidget_ticket.blockSignals(False)
 
-    def get_current_selected_ticket_id(self):
-        ticket = self.get_current_selected_ticket()
-        return ticket["id"] if ticket else None
+    def get_current_selected_script_name(self):
+        item = self.ui.listWidget_ticket.currentItem()
+        return item.text() if item else None
 
-    def get_current_selected_ticket(self):
-        row = self.ui.listWidget_ticket.currentRow()
-        if 0 <= row < len(self._tickets):
-            return self._tickets[row]
-        return None
+    def select_script_by_name(self, name):
+        for row in range(self.ui.listWidget_ticket.count()):
+            if self.ui.listWidget_ticket.item(row).text() == name:
+                self.ui.listWidget_ticket.setCurrentRow(row)
+                return
 
-    def refresh_publish_destination(self):
-        if self._mode is None:
-            self.ui.label_publish_root.setText(
-                "This repo has no Publish Mode set — ask a studio admin to set it under "
-                "Repository Setting > MayaPublisher."
-            )
-            self.ui.label_job_name.setText("")
-            self.ui.label_job_task.setText("")
-            self.ui.label_version_publish.setText("")
+    def create_ticket_script(self):
+        if self._current_category is None:
+            cmds.confirmDialog(m="Pick a category first.", button=["Ok"])
             return
 
-        ticket = self.get_current_selected_ticket()
+        result = cmds.promptDialog(
+            title="New Ticket Script",
+            message="Script name ({}):".format(self._current_category),
+            button=["Create", "Cancel"],
+            defaultButton="Create",
+            cancelButton="Cancel",
+            dismissString="Cancel",
+        )
+        if result != "Create":
+            return
 
-        if ticket is None:
-            self.ui.label_publish_root.setText("No tickets yet — click 'Manage Tickets...' to create one.")
+        name = cmds.promptDialog(query=True, text=True).strip()
+        if not name or os.sep in name or "/" in name:
+            cmds.confirmDialog(m="Invalid script name.", button=["Ok"])
+            return
+
+        try:
+            path = function.create_ticket_script(self._current_category, name)
+        except ValueError as exc:
+            cmds.confirmDialog(m=str(exc), button=["Ok"])
+            return
+
+        self.initialize_ticket_list_widget()
+        self.select_script_by_name(path.stem)
+        self.refresh_publish_destination()
+
+    def edit_selected_script(self):
+        script_name = self.get_current_selected_script_name()
+        if self._current_category is None or script_name is None:
+            return
+
+        path = function.script_path(self._current_category, script_name)
+        if not path.exists():
+            cmds.confirmDialog(m="Script file no longer exists.", button=["Ok"])
+            return
+        os.startfile(str(path))
+
+    def open_ticket_dir(self):
+        if self._current_category is None:
+            return
+        folder = function.category_dir(self._current_category)
+        folder.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(folder))
+
+    # ------------------------------------------------------------
+    # PUBLISH
+    # ------------------------------------------------------------
+    def refresh_publish_destination(self):
+        script_name = self.get_current_selected_script_name()
+
+        if self._current_category is None or script_name is None:
+            self.ui.label_publish_root.setText("Pick a category and a ticket script to see the publish destination.")
             self.ui.label_job_name.setText("")
             self.ui.label_job_task.setText("")
             self.ui.label_version_publish.setText("")
             return
 
         try:
-            publish_root = tickets.get_publish_root_for_ticket(function.TOOL_ID, ticket)
+            publish_root = function.get_publish_root_for_category(self._current_category)
         except RuntimeError as exc:
             self.ui.label_publish_root.setText(str(exc))
             self.ui.label_job_name.setText("")
-            self.ui.label_job_task.setText(ticket["name"])
+            self.ui.label_job_task.setText(script_name)
             self.ui.label_version_publish.setText("")
             return
 
         self.ui.label_publish_root.setText(publish_root)
         self.ui.label_job_name.setText(os.path.basename(publish_root))
-        self.ui.label_job_task.setText(ticket["name"])
+        self.ui.label_job_task.setText(script_name)
 
-        next_version = versioning.get_new_version(os.path.join(publish_root, ticket["folder_name"]))
+        next_version = versioning.get_new_version(os.path.join(publish_root, script_name))
         self.ui.label_version_publish.setText("v{:03d}".format(next_version))
 
     def take_a_snapshot(self):
@@ -162,12 +216,14 @@ class MainWindow(ToolkitWindow):
         btn.setIconSize(btn.size())
 
     def publish_button(self):
-        ticket = self.get_current_selected_ticket()
-        if ticket is None:
+        script_name = self.get_current_selected_script_name()
+        if self._current_category is None or script_name is None:
             return
 
         result = cmds.confirmDialog(
-            m="โปรดตรวจสอบและยืนยันข้อมูลการพับบลิชนี้\n\nTicket : {}".format(ticket["name"]),
+            m="โปรดตรวจสอบและยืนยันข้อมูลการพับบลิชนี้\n\nCategory : {}\nTicket Script : {}".format(
+                self._current_category, script_name
+            ),
             button=["Ok", "Cancel"],
             defaultButton="Cancel",
             cancelButton="Ok",
@@ -176,12 +232,12 @@ class MainWindow(ToolkitWindow):
             return
 
         try:
-            version_dir, version = function.publish(ticket)
+            version_dir, version = function.publish(self._current_category, script_name)
         except RuntimeError as exc:
             cmds.confirmDialog(m=str(exc), button=["Ok"])
             return
 
-        self.ui.label_publish_result.setText("Publish สำเร็จ! : {} v{:03d}".format(ticket["name"], version))
+        self.ui.label_publish_result.setText("Publish สำเร็จ! : {} v{:03d}".format(script_name, version))
         self.refresh_publish_destination()
 
         note_text = self.ui.textBrowser_publish_info.toPlainText()
@@ -202,16 +258,16 @@ class MainWindow(ToolkitWindow):
             os.startfile(version_dir)
 
     def open_publish_dir(self):
-        ticket = self.get_current_selected_ticket()
-        if ticket is None:
+        script_name = self.get_current_selected_script_name()
+        if self._current_category is None or script_name is None:
             return
 
         try:
-            publish_root = tickets.get_publish_root_for_ticket(function.TOOL_ID, ticket)
+            publish_root = function.get_publish_root_for_category(self._current_category)
         except RuntimeError as exc:
             cmds.confirmDialog(m=str(exc), button=["Ok"])
             return
 
-        base_dir = os.path.join(publish_root, ticket["folder_name"])
+        base_dir = os.path.join(publish_root, script_name)
         versioning.make_sure_folder_exist(base_dir)
         os.startfile(base_dir)

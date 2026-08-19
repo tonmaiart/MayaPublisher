@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>320</width>
-    <height>640</height>
+    <width>352</width>
+    <height>755</height>
    </rect>
   </property>
   <property name="font">
@@ -36,28 +36,46 @@
        <string notr="true">color:white</string>
       </property>
       <property name="title">
-       <string>Publish Destination</string>
+       <string>Publish Metadata</string>
       </property>
       <layout class="QGridLayout" name="gridLayout_dest">
-       <item row="0" column="0">
-        <widget class="QLabel" name="label_publish_root">
-         <property name="font">
-          <font>
-           <pointsize>9</pointsize>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">color:rgb(255, 221, 84)</string>
-         </property>
-         <property name="text">
-          <string>(no active repo)</string>
-         </property>
-         <property name="wordWrap">
-          <bool>true</bool>
-         </property>
-        </widget>
+       <item row="1" column="0">
+        <layout class="QVBoxLayout" name="verticalLayout_2">
+         <item>
+          <widget class="QLabel" name="label_publish_root">
+           <property name="font">
+            <font>
+             <pointsize>9</pointsize>
+             <weight>75</weight>
+             <bold>true</bold>
+            </font>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">color:rgb(255, 221, 84)</string>
+           </property>
+           <property name="text">
+            <string>(no active repo)</string>
+           </property>
+           <property name="wordWrap">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_3" stretch="7,3">
+           <item>
+            <widget class="QComboBox" name="comboBox_tickets_catagory"/>
+           </item>
+           <item>
+            <widget class="QPushButton" name="pushButton_catagory_config">
+             <property name="text">
+              <string>Save</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>
@@ -74,7 +92,7 @@
        <string notr="true">color:white</string>
       </property>
       <property name="title">
-       <string>Choose Ticket</string>
+       <string>Choose Ticket Scripts</string>
       </property>
       <layout class="QGridLayout" name="gridLayout_2">
        <item row="0" column="0">
@@ -106,6 +124,31 @@ QListWidget::item:selected {
 </string>
          </property>
         </widget>
+       </item>
+       <item row="1" column="0">
+        <layout class="QHBoxLayout" name="horizontalLayout_2">
+         <item>
+          <widget class="QPushButton" name="pushButton_create_ticket_scripts">
+           <property name="text">
+            <string>New Scripts...</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="pushButton_edit_selected_script">
+           <property name="text">
+            <string>Edit...</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="pushButton_open_ticket_dir">
+           <property name="text">
+            <string>Open Ticket Dir...</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>
@@ -196,7 +239,7 @@ QPushButton:pressed {
               </property>
              </widget>
             </item>
-            <item row="0" column="1">
+            <item row="0" column="2">
              <widget class="QLabel" name="label_job_name">
               <property name="font">
                <font>
@@ -217,46 +260,6 @@ QPushButton:pressed {
              </widget>
             </item>
             <item row="1" column="0">
-             <widget class="QLabel" name="label_version_current_6">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>50</weight>
-                <bold>false</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:white</string>
-              </property>
-              <property name="text">
-               <string>Ticket :</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item row="1" column="1">
-             <widget class="QLabel" name="label_job_task">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>75</weight>
-                <bold>true</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:rgb(255, 221, 84)</string>
-              </property>
-              <property name="text">
-               <string>0</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item row="2" column="0">
              <widget class="QLabel" name="label_version_current_3">
               <property name="font">
                <font>
@@ -276,7 +279,7 @@ QPushButton:pressed {
               </property>
              </widget>
             </item>
-            <item row="2" column="1">
+            <item row="1" column="2">
              <widget class="QLabel" name="label_version_publish">
               <property name="font">
                <font>
@@ -296,27 +299,7 @@ QPushButton:pressed {
               </property>
              </widget>
             </item>
-            <item row="3" column="0">
-             <widget class="QLabel" name="label_version_current_7">
-              <property name="font">
-               <font>
-                <pointsize>10</pointsize>
-                <weight>50</weight>
-                <bold>false</bold>
-               </font>
-              </property>
-              <property name="styleSheet">
-               <string notr="true">color:white</string>
-              </property>
-              <property name="text">
-               <string>Directory</string>
-              </property>
-              <property name="alignment">
-               <set>Qt::AlignCenter</set>
-              </property>
-             </widget>
-            </item>
-            <item row="3" column="1">
+            <item row="2" column="2">
              <widget class="QPushButton" name="pushButton_open_dir">
               <property name="sizePolicy">
                <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
@@ -353,6 +336,26 @@ QPushButton:pressed {
               </property>
               <property name="text">
                <string>📁</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="label_version_current_7">
+              <property name="font">
+               <font>
+                <pointsize>10</pointsize>
+                <weight>50</weight>
+                <bold>false</bold>
+               </font>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">color:white</string>
+              </property>
+              <property name="text">
+               <string>Directory</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
               </property>
              </widget>
             </item>

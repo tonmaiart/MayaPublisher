@@ -4,6 +4,6 @@
   "version": "1.0.0",
   "api_version": 1,
   "entry_point": "plugin.py",
-  "description": "Publishes the active Maya scene (Rig, Model, or Animation, per this repo's configured Publish Mode) into the active repo's connected pipeline publish folder, versioned via PublishApi. Contributes its maya-scripts folder to the Maya Launcher env bridge — does not launch Maya itself.",
+  "description": "Publishes the active Maya scene using a Ticket Script the artist picks from this tool's own bundled maya-scripts/MayaPublisher/tickets/<Category>/ folder, into the pipeline publish folder whose Custom Path label matches that category, versioned via PublishApi. Contributes its maya-scripts folder to the Maya Launcher env bridge — does not launch Maya itself and has no UkoreHub-side UI of its own.",
   "requires": ["maya_toolkit", "publish_api"]
 }
