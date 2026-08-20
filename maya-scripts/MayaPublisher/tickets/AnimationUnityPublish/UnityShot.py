@@ -26,7 +26,6 @@ import maya.cmds as cmds
 import maya.mel as mel
 
 from UkoreMaya.core import Pipeline
-from UkoreMaya.menu import General
 
 from tmlib.core import Validate, Utility, Connection, Scene
 
@@ -46,8 +45,6 @@ def validate(context):
         export_anim=True,
         export_camera=True,
         export_head_locator=True,
-        pick_character_enable=False,
-        pick_character=["Kafka"],
         disable_segment_scale_compensate=False,
     )
 
@@ -60,8 +57,6 @@ def export_shot_to_unity(
     export_anim=True,
     export_camera=True,
     export_head_locator=True,
-    pick_character_enable=False,
-    pick_character=["Kafka"],
     disable_segment_scale_compensate=False,
 ):
 
@@ -72,8 +67,6 @@ def export_shot_to_unity(
     print("- Export Anim : ", export_anim)
     print("- Export Camera : ", export_camera)
     print("- Export Head Locator : ", export_head_locator)
-    print("- Pick Character Enable : ", pick_character_enable)
-    print("- Pick Character : ", pick_character)
 
     # shot name prefix, taken from the current scene's parent folder name
     current_file_path = cmds.file(sn=True, q=1)
@@ -81,9 +74,7 @@ def export_shot_to_unity(
 
     # validate face set
     if validate_material:
-        dict_mesh = Pipeline.get_character_meshes(
-            pick_character_enable=pick_character_enable, pick_character=pick_character
-        )
+        dict_mesh = Pipeline.get_character_meshes(pick_character_enable=False, pick_character=[])
 
         for key in dict_mesh.keys():
             geos = dict_mesh[key]
@@ -95,8 +86,6 @@ def export_shot_to_unity(
         export_anim_fbx(
             export_path,
             prefix_seperate=prefix_seperate,
-            pick_character_enable=pick_character_enable,
-            pick_character=pick_character,
             version=version,
             prefix_shot=current_file_dir_name,
             disable_segment_scale_compensate=disable_segment_scale_compensate,
@@ -140,36 +129,74 @@ def _remove_non_joint_descendants(root_joint):
         cmds.delete(node)
 
 
+def _find_character_deformation_roots():
+    """Find every character's own "DeformationSystem" group, keyed by the
+    top-level group in its Full Hierarchy Path (e.g.
+    "|Jacob|Group|DeformationSystem" -> character "Jacob"). Auto-detects
+    every character found in the scene — no picked-character list needed.
+
+    Returns {character_name: deformation_system_full_path}.
+    """
+
+    nodes = cmds.ls("DeformationSystem", "*:DeformationSystem", type="transform", long=True) or []
+
+    return {node.split("|")[1]: node for node in nodes}
+
+
+def _joints_under(deformation_system_root):
+    return (
+        cmds.listRelatives(deformation_system_root, allDescendents=True, fullPath=True, type="joint")
+        or []
+    )
+
+
 def bake_and_detach_skeleton(disable_segment_scale_compensate=False):
     """
-    Bake the shot's skeleton animation onto its joints, break every
+    Bake every character's skeleton animation onto its joints, break every
     remaining incoming connection driving them (constraints, rig controls),
     clear any visibility keyframes and force every joint's visibility on,
-    strip any non-joint node left under a root joint, then move each
-    skeleton root joint to world — same treatment
-    RigUnityPublish/UnityRigSetup.py's bake_and_detach_skeleton() applies,
-    just with no mesh involved (this ticket exports skeleton only).
+    and strip any non-joint node left under each root joint — same
+    treatment RigUnityPublish/UnityRigSetup.py's bake_and_detach_skeleton()
+    applies, just with no mesh involved (this ticket exports skeleton
+    only).
+
+    Each character's joints are auto-detected under its own
+    "DeformationSystem" group (see _find_character_deformation_roots) — not
+    a single shared "DeformSet".
+
+    Deliberately does NOT move any root joint to world here — the caller
+    must move each character's root(s) to world one at a time, export, then
+    reparent back before moving the next character's root. If two
+    characters happen to share a root joint's short name (a common rig
+    convention, e.g. both named "Root_M") and both were at world at once,
+    Maya would auto-rename the second on collision, breaking the
+    "|" + short_name lookup used to find each character's moved root.
 
     disable_segment_scale_compensate: optional, off by default — when True,
     also disables segmentScaleCompensate on every joint (Unity ignores it
     and misreads scaled joint chains without this off).
+
+    Returns {character_name: [root_joint, ...]}, each root joint's
+    ORIGINAL full path (not yet moved to world).
     """
 
-    if not cmds.objExists("DeformSet"):
-        cmds.warning("Not found DeformSet, skip baking skeleton (shot may have no Character)")
-        return
+    character_roots = _find_character_deformation_roots()
+
+    if not character_roots:
+        cmds.warning("Not found any DeformationSystem group, skip baking skeleton")
+        return {}
+
+    character_joints = {
+        character_name: _joints_under(root) for character_name, root in character_roots.items()
+    }
+    list_joint = [joint for joints in character_joints.values() for joint in joints]
+
+    if not list_joint:
+        cmds.warning("Not found any joint under DeformationSystem")
+        return {}
 
     start_frame = cmds.playbackOptions(q=True, min=True)
     end_frame = cmds.playbackOptions(q=True, max=True)
-
-    cmds.select(clear=True)
-    cmds.select("DeformSet", add=True)
-    General.sort_by_type(typ="joint")
-    list_joint = cmds.ls(sl=True, long=True) or []
-
-    if not list_joint:
-        cmds.warning("Not found any joint in DeformSet")
-        return
 
     cmds.bakeResults(
         list_joint,
@@ -188,31 +215,31 @@ def bake_and_detach_skeleton(disable_segment_scale_compensate=False):
         cmds.cutKey(joint, attribute="visibility", clear=True)
         cmds.setAttr(f"{joint}.visibility", True)
 
-    # optional: must happen before _move_to_world() below, which changes
-    # every joint's full path and would make list_joint's cached paths stale
     if disable_segment_scale_compensate:
         for joint in list_joint:
             if cmds.attributeQuery("segmentScaleCompensate", node=joint, exists=True):
                 cmds.setAttr(f"{joint}.segmentScaleCompensate", False)
 
-    # move each skeleton's root joint (no joint parent within the set) to world
-    list_root_joint = []
-    for joint in list_joint:
-        parent = cmds.listRelatives(joint, parent=True, fullPath=True)
-        if not parent or parent[0] not in list_joint:
-            list_root_joint.append(joint)
+    # each character's root joint(s) — no joint parent within its own
+    # DeformationSystem
+    character_root_joints = {}
+    for character_name, joints in character_joints.items():
+        character_root_joints[character_name] = [
+            joint
+            for joint in joints
+            if (cmds.listRelatives(joint, parent=True, fullPath=True) or [None])[0] not in joints
+        ]
 
-    for root_joint in list_root_joint:
-        _remove_non_joint_descendants(root_joint)
+    for root_joints in character_root_joints.values():
+        for root_joint in root_joints:
+            _remove_non_joint_descendants(root_joint)
 
-    _move_to_world(list_root_joint)
+    return character_root_joints
 
 
 def export_anim_fbx(
     export_path,
     prefix_seperate=True,
-    pick_character_enable=False,
-    pick_character=["Kafka"],
     version="",
     prefix_shot="",
     disable_segment_scale_compensate=False,
@@ -229,9 +256,7 @@ def export_anim_fbx(
     print("# Exporting Anim Skeleton Fbx #")
 
     if prefix_seperate:
-        dict_mesh = Pipeline.get_character_meshes(
-            pick_character_enable=pick_character_enable, pick_character=pick_character
-        )
+        dict_mesh = Pipeline.get_character_meshes(pick_character_enable=False, pick_character=[])
     else:
         dict_mesh = {"anim": Pipeline.list_meshes_with_suffix_geo()}
 
@@ -241,7 +266,9 @@ def export_anim_fbx(
         for mesh in dict_mesh[key]:
             print("- ", Utility.cut(mesh))
 
-    bake_and_detach_skeleton(disable_segment_scale_compensate=disable_segment_scale_compensate)
+    character_root_joints = bake_and_detach_skeleton(
+        disable_segment_scale_compensate=disable_segment_scale_compensate
+    )
 
     # FBX export settings (shared for every character)
     mel.eval('FBXExportSmoothingGroups -v true')
@@ -271,17 +298,50 @@ def export_anim_fbx(
 
         export_fbx_file_path = os.path.join(export_path, export_name).replace("\\", "/")
 
-        if not cmds.objExists("DeformSet"):
-            cmds.warning(f"Not found DeformSet, skip exporting {key} (shot may have no Character)")
+        root_joints = character_root_joints.get(key)
+        if not root_joints:
+            cmds.warning(f"Not found DeformationSystem skeleton for {key}, skip exporting")
             continue
 
+        # move this character's root(s) to world one at a time, export,
+        # then reparent back before the next character — if two characters
+        # share a root joint short name (e.g. both "Root_M") and were both
+        # at world at once, Maya would auto-rename the second on collision
+        original_parents = [
+            (cmds.listRelatives(root_joint, parent=True, fullPath=True) or [None])[0]
+            for root_joint in root_joints
+        ]
+
+        _move_to_world(root_joints)
+
+        new_root_paths = ["|" + root_joint.split("|")[-1] for root_joint in root_joints]
+        joints = []
+        for new_root_path in new_root_paths:
+            joints.append(new_root_path)
+            joints.extend(
+                cmds.listRelatives(new_root_path, allDescendents=True, fullPath=True, type="joint")
+                or []
+            )
+
         cmds.select(clear=True)
-        cmds.select("DeformSet", add=True)
-        General.sort_by_type(typ="joint")
+        cmds.select(joints, add=True)
 
         print("fbx export path : ", export_fbx_file_path)
         mel.eval(f'FBXExport -f "{export_fbx_file_path}" -s')
         print(f"Exported: {export_fbx_file_path}")
+
+        for new_root_path, original_parent in zip(new_root_paths, original_parents):
+            if original_parent:
+                cmds.parent(new_root_path, original_parent)
+
+
+def _unlock_all_attributes(node):
+    """Unlock every locked attribute on node (transform or shape channels
+    alike) so a later bakeResults/rename/parent on it can't silently skip
+    a channel or error out on a locked one."""
+
+    for attr in cmds.listAttr(node, locked=True) or []:
+        cmds.setAttr(f"{node}.{attr}", lock=False)
 
 
 def export_anim_camera(export_fbx_path):
@@ -301,6 +361,11 @@ def export_anim_camera(export_fbx_path):
 
     cam_shot = cams[0]
     cam_shot_shape = cmds.listRelatives(cam_shot, shapes=True, fullPath=True)[0]
+
+    # unlock before touching anything else below (bake/parent/rename all
+    # need write access to these channels)
+    _unlock_all_attributes(cam_shot)
+    _unlock_all_attributes(cam_shot_shape)
 
     start_frame = cmds.playbackOptions(q=True, min=True)
     end_frame = cmds.playbackOptions(q=True, max=True)
@@ -326,6 +391,10 @@ def export_anim_camera(export_fbx_path):
 
     print(f"Exporting Camera to Path : {export_fbx_path}")
     mel.eval("FBXExportBakeComplexAnimation -v true")
+    # export_anim_fbx() above turns this off (FBXExport* options are global,
+    # not scoped per export) — must turn it back on or RenderCam's shape
+    # data is silently dropped from the fbx even though it's selected
+    mel.eval("FBXExportCameras -v true")
     cmds.file(
         export_fbx_path,
         force=True,  # -force (บังคับเขียนทับไฟล์เดิม)
