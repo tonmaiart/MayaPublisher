@@ -155,6 +155,10 @@ def bake_and_detach_skeleton(disable_segment_scale_compensate=False):
     and misreads scaled joint chains without this off).
     """
 
+    if not cmds.objExists("DeformSet"):
+        cmds.warning("Not found DeformSet, skip baking skeleton (shot may have no Character)")
+        return
+
     start_frame = cmds.playbackOptions(q=True, min=True)
     end_frame = cmds.playbackOptions(q=True, max=True)
 
@@ -267,6 +271,10 @@ def export_anim_fbx(
 
         export_fbx_file_path = os.path.join(export_path, export_name).replace("\\", "/")
 
+        if not cmds.objExists("DeformSet"):
+            cmds.warning(f"Not found DeformSet, skip exporting {key} (shot may have no Character)")
+            continue
+
         cmds.select(clear=True)
         cmds.select("DeformSet", add=True)
         General.sort_by_type(typ="joint")
@@ -277,56 +285,52 @@ def export_anim_fbx(
 
 
 def export_anim_camera(export_fbx_path):
-    """Designed for camera named RenderCam , this will export camera fbx file"""
+    """Designed for camera named RenderCam, this will export camera fbx file.
+
+    Bakes camshot's own transform + shape keyframes (so anything driven by
+    constraints/expressions/connections becomes plain keys), deletes every
+    constraint left on it, moves it to world, then exports it directly —
+    replaces the old approach of building a separate RenderCam duplicate
+    constrained/connected to camshot."""
 
     cams = cmds.ls("camshot", "*:camshot", "*:*:camshot", transforms=True)
 
     if not cams:
         cmds.warning("ไม่พบกล้อง camshot")
-    else:
-        # Search Cam Shot
-        cam_shot = cams[0]
-        cam_shot_shape = cmds.listRelatives(cam_shot, shapes=True)[0]
+        return
 
-        # Create Render Cam
-        cam_render_name = "RenderCam"
+    cam_shot = cams[0]
+    cam_shot_shape = cmds.listRelatives(cam_shot, shapes=True, fullPath=True)[0]
 
-        min_time = cmds.playbackOptions(query=True, minTime=True)
-        max_time = cmds.playbackOptions(query=True, maxTime=True)
+    start_frame = cmds.playbackOptions(q=True, min=True)
+    end_frame = cmds.playbackOptions(q=True, max=True)
 
-        cam_render, cam_render_shape = cmds.camera(n=cam_render_name)
+    cmds.bakeResults(
+        [cam_shot, cam_shot_shape],
+        simulation=True,
+        t=(start_frame, end_frame),
+        sampleBy=1,
+        disableImplicitControl=True,
+        preserveOutsideKeys=True,
+    )
 
-        constraint_list = cmds.parentConstraint(cam_shot, cam_render)
-        cmds.connectAttr(
-            "{}.focalLength".format(cam_shot_shape),
-            "{}.focalLength".format(cam_render_shape),
-            f=True,
-        )
-        cmds.connectAttr(
-            "{}.overscan".format(cam_shot_shape),
-            "{}.overscan".format(cam_render_shape),
-            f=True,
-        )
-        cmds.connectAttr(
-            "{}.cameraAperture".format(cam_shot_shape),
-            "{}.cameraAperture".format(cam_render_shape),
-            f=True,
-        )
+    constraints = cmds.listRelatives(cam_shot, children=True, type="constraint", fullPath=True) or []
+    if constraints:
+        cmds.delete(constraints)
 
-        # Select and rename camera
-        cmds.rename(cam_render, cam_render_name)
-        cmds.select(cam_render_name, replace=True)
+    _move_to_world([cam_shot])
 
-        print(f"Exporting Camera to Path : {export_fbx_path}")
-        mel.eval("FBXExportBakeComplexAnimation -v true")
-        cmds.file(
-            export_fbx_path,
-            force=True,  # -force (บังคับเขียนทับไฟล์เดิม)
-            options="fbx",  # -options "fbx" (กำหนดตัวเลือกการ Export)
-            type="FBX export",  # -typ "FBX export" (ประเภทไฟล์)
-            preserveReferences=True,  # -pr (รักษา Reference files ไว้)
-            exportSelected=True,  # -es (Export เฉพาะสิ่งที่ถูกเลือก)
-        )
+    cam_render_name = "RenderCam"
+    cam_shot = cmds.rename(cam_shot, cam_render_name)
+    cmds.select(cam_shot, replace=True)
 
-        # Delete temp camera
-        cmds.delete(cam_render_name)
+    print(f"Exporting Camera to Path : {export_fbx_path}")
+    mel.eval("FBXExportBakeComplexAnimation -v true")
+    cmds.file(
+        export_fbx_path,
+        force=True,  # -force (บังคับเขียนทับไฟล์เดิม)
+        options="fbx",  # -options "fbx" (กำหนดตัวเลือกการ Export)
+        type="FBX export",  # -typ "FBX export" (ประเภทไฟล์)
+        preserveReferences=True,  # -pr (รักษา Reference files ไว้)
+        exportSelected=True,  # -es (Export เฉพาะสิ่งที่ถูกเลือก)
+    )

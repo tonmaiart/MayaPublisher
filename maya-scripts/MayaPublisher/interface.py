@@ -41,6 +41,7 @@ class MainWindow(ToolkitWindow):
         self.connect_signals()
         self.populate_repo_info()
         self.populate_categories()
+        self._register_scene_refresh_job()
 
     # ------------------------------------------------------------
     # SIGNALS
@@ -48,6 +49,7 @@ class MainWindow(ToolkitWindow):
     def connect_signals(self):
         self.ui.comboBox_tickets_catagory.currentIndexChanged.connect(self.on_category_changed)
         self.ui.pushButton_catagory_config.clicked.connect(self.save_category_config)
+        self.ui.pushButton_refresh.clicked.connect(self.refresh_all)
         self.ui.pushButton_RefreshScripts.clicked.connect(self.refresh_ticket_scripts)
         self.ui.pushButton_create_ticket_scripts.clicked.connect(self.create_ticket_script)
         self.ui.pushButton_edit_selected_script.clicked.connect(self.edit_selected_script)
@@ -56,6 +58,27 @@ class MainWindow(ToolkitWindow):
         self.ui.pushButton_publish.clicked.connect(self.publish_button)
         self.ui.pushButton_open_dir.clicked.connect(self.open_publish_dir)
         self.ui.pushButton_take_a_snapshot.clicked.connect(self.take_a_snapshot)
+
+    # ------------------------------------------------------------
+    # REFRESH
+    # ------------------------------------------------------------
+    def refresh_all(self, *_args):
+        """pushButton_refresh — full refresh, same as closing and
+        reopening the tool (repo info, categories, ticket list, publish
+        destination)."""
+        self.populate_repo_info()
+        self.populate_categories()
+
+    def _register_scene_refresh_job(self):
+        """Keeps this window in sync with whichever scene gets opened
+        next (repo/category/ticket list can all depend on the active
+        scene), without the artist having to close and reopen the tool.
+        parent=WINDOW_OBJECT ties the job's lifetime to this window's own
+        control, which uitools.deleteControl() (in __init__, on the next
+        reopen) or a normal close already tears down — so Maya kills the
+        job itself instead of it leaking/stacking across reopens."""
+        cmds.scriptJob(event=["SceneOpened", self.refresh_all], parent=self.WINDOW_OBJECT, protected=True)
+        cmds.scriptJob(event=["NewSceneOpened", self.refresh_all], parent=self.WINDOW_OBJECT, protected=True)
 
     # ------------------------------------------------------------
     # REPO INFO
@@ -199,9 +222,11 @@ class MainWindow(ToolkitWindow):
     # ------------------------------------------------------------
     def refresh_publish_destination(self):
         script_name = self.get_current_selected_script_name()
+        self.ui.label_publish_script_name.setText(script_name or "")
 
         if self._current_category is None or script_name is None:
             self.ui.label_publish_root.setText("Pick a category and a ticket script to see the publish destination.")
+            self.ui.label_publish_prefix.setText("")
             self.ui.label_repo_target_name.setText("")
             self.ui.label_lastest_publish_version.setText("")
             self.ui.label_next_publish_version.setText("")
@@ -212,12 +237,14 @@ class MainWindow(ToolkitWindow):
             publish_root, target_repo_name = function.get_publish_root_for_category(self._current_category)
         except RuntimeError as exc:
             self.ui.label_publish_root.setText(str(exc))
+            self.ui.label_publish_prefix.setText("")
             self.ui.label_repo_target_name.setText("")
             self.ui.label_lastest_publish_version.setText("")
             self.ui.label_next_publish_version.setText("")
             return
 
         self.ui.label_publish_root.setText(os.path.join(publish_root, script_name, block_name))
+        self.ui.label_publish_prefix.setText(block_name)
         self.ui.label_repo_target_name.setText(target_repo_name)
 
         latest_version, next_version = function.get_version_info(publish_root, script_name, block_name)
