@@ -48,6 +48,7 @@ def validate(context):
         export_head_locator=True,
         pick_character_enable=False,
         pick_character=["Kafka"],
+        disable_segment_scale_compensate=False,
     )
 
 
@@ -61,6 +62,7 @@ def export_shot_to_unity(
     export_head_locator=True,
     pick_character_enable=False,
     pick_character=["Kafka"],
+    disable_segment_scale_compensate=False,
 ):
 
     print("# Export Shot to Unity #")
@@ -97,6 +99,7 @@ def export_shot_to_unity(
             pick_character=pick_character,
             version=version,
             prefix_shot=current_file_dir_name,
+            disable_segment_scale_compensate=disable_segment_scale_compensate,
         )
 
     if export_camera:
@@ -137,7 +140,7 @@ def _remove_non_joint_descendants(root_joint):
         cmds.delete(node)
 
 
-def bake_and_detach_skeleton():
+def bake_and_detach_skeleton(disable_segment_scale_compensate=False):
     """
     Bake the shot's skeleton animation onto its joints, break every
     remaining incoming connection driving them (constraints, rig controls),
@@ -146,6 +149,10 @@ def bake_and_detach_skeleton():
     skeleton root joint to world — same treatment
     RigUnityPublish/UnityRigSetup.py's bake_and_detach_skeleton() applies,
     just with no mesh involved (this ticket exports skeleton only).
+
+    disable_segment_scale_compensate: optional, off by default — when True,
+    also disables segmentScaleCompensate on every joint (Unity ignores it
+    and misreads scaled joint chains without this off).
     """
 
     start_frame = cmds.playbackOptions(q=True, min=True)
@@ -177,13 +184,12 @@ def bake_and_detach_skeleton():
         cmds.cutKey(joint, attribute="visibility", clear=True)
         cmds.setAttr(f"{joint}.visibility", True)
 
-    # Unity ignores segmentScaleCompensate and misreads scaled joint chains
-    # without this off, so disable it on every joint here — must happen
-    # before _move_to_world() below, which changes every joint's full path
-    # and would make list_joint's cached paths stale
-    for joint in list_joint:
-        if cmds.attributeQuery("segmentScaleCompensate", node=joint, exists=True):
-            cmds.setAttr(f"{joint}.segmentScaleCompensate", False)
+    # optional: must happen before _move_to_world() below, which changes
+    # every joint's full path and would make list_joint's cached paths stale
+    if disable_segment_scale_compensate:
+        for joint in list_joint:
+            if cmds.attributeQuery("segmentScaleCompensate", node=joint, exists=True):
+                cmds.setAttr(f"{joint}.segmentScaleCompensate", False)
 
     # move each skeleton's root joint (no joint parent within the set) to world
     list_root_joint = []
@@ -205,6 +211,7 @@ def export_anim_fbx(
     pick_character=["Kafka"],
     version="",
     prefix_shot="",
+    disable_segment_scale_compensate=False,
 ):
     """
     Export the shot's baked skeleton to per-character FBX files — no mesh.
@@ -230,7 +237,7 @@ def export_anim_fbx(
         for mesh in dict_mesh[key]:
             print("- ", Utility.cut(mesh))
 
-    bake_and_detach_skeleton()
+    bake_and_detach_skeleton(disable_segment_scale_compensate=disable_segment_scale_compensate)
 
     # FBX export settings (shared for every character)
     mel.eval('FBXExportSmoothingGroups -v true')
