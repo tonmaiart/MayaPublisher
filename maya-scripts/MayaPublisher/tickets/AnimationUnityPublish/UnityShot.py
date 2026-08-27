@@ -46,7 +46,7 @@ def validate(context):
         export_anim=True,
         export_camera=True,
         export_head_locator=True,
-        disable_segment_scale_compensate=False,
+        disable_segment_scale_compensate=True,
     )
 
 
