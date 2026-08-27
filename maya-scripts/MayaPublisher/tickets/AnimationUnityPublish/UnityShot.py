@@ -20,6 +20,7 @@ script:
     }
 """
 
+import json
 import os
 
 import maya.cmds as cmds
@@ -102,11 +103,55 @@ def export_shot_to_unity(
 
 
 def _move_to_world(list_node):
-    """Reparent each given transform to world, skipping ones already there."""
+    """Reparent each given transform to world, skipping ones already there.
 
+    Returns each node's resulting full path, in order. Must be used instead
+    of guessing "|" + short_name afterward — if a world-level sibling
+    already has the same short name (another character's root, a leftover
+    reference node, anything), Maya silently renames the newly-parented
+    node on collision (e.g. "Root_M" -> "Root_M1"), and the guessed path
+    would point at nothing."""
+
+    result = []
     for node in list_node:
         if cmds.listRelatives(node, parent=True, fullPath=True):
-            cmds.parent(node, world=True)
+            result.append(cmds.parent(node, world=True)[0])
+        else:
+            result.append(node)
+    return result
+
+
+def _undo_scale_compensation_dummy(node_path):
+    """If parenting node_path to world (via _move_to_world) caused Maya to
+    insert an automatic compensation transform above it, collapse that
+    dummy back to scale 1, reparent node_path directly to world in its
+    place, and delete the now-empty dummy.
+
+    This happens when a joint's jointOrient combines with a scaled-away
+    parent to produce shear — a joint has no shear attribute of its own to
+    absorb it, so Maya creates an extra transform (named e.g. "Root_M1" or
+    "group1") to hold the compensating scale/shear instead, leaving
+    node_path as that dummy's child rather than sitting directly at world.
+
+    Returns (final_path, min_scale) — min_scale is the smallest of the
+    dummy's scaleX/Y/Z, or 1.0 when no dummy was created.
+    """
+
+    parent = cmds.listRelatives(node_path, parent=True, fullPath=True)
+    if not parent:
+        print(f"[scale-metadata] {node_path}: no dummy, parent is already world")
+        return node_path, 1.0
+
+    dummy = parent[0]
+    scale_xyz = cmds.getAttr(f"{dummy}.scale")[0]
+    min_scale = min(scale_xyz)
+    print(f"[scale-metadata] {node_path}: dummy={dummy} scale={scale_xyz} min={min_scale}")
+
+    cmds.setAttr(f"{dummy}.scale", 1, 1, 1, type="double3")
+    final_path = cmds.parent(node_path, world=True)[0]
+    cmds.delete(dummy)
+
+    return final_path, min_scale
 
 
 def _remove_non_joint_descendants(root_joint):
@@ -287,6 +332,10 @@ def export_anim_fbx(
     mel.eval('FBXExportInputConnections -v false')
     mel.eval('FBXExportUpAxis y')
 
+    # per-character world-scale metadata, keyed the same as dict_mesh —
+    # 1.0 unless _undo_scale_compensation_dummy finds a compensation dummy
+    shot_metadata = {key: {"scale_min": 1.0} for key in dict_mesh.keys()}
+
     for key in dict_mesh.keys():
         if version:
             export_name = f"{key}_anim_{version:03}.fbx"
@@ -312,9 +361,16 @@ def export_anim_fbx(
             for root_joint in root_joints
         ]
 
-        _move_to_world(root_joints)
+        moved_root_joints = _move_to_world(root_joints)
 
-        new_root_paths = ["|" + root_joint.split("|")[-1] for root_joint in root_joints]
+        new_root_paths = []
+        root_scales = []
+        for moved_root_joint in moved_root_joints:
+            final_path, min_scale = _undo_scale_compensation_dummy(moved_root_joint)
+            new_root_paths.append(final_path)
+            root_scales.append(min_scale)
+        shot_metadata[key] = {"scale_min": min(root_scales)}
+
         joints = []
         for new_root_path in new_root_paths:
             joints.append(new_root_path)
@@ -333,6 +389,12 @@ def export_anim_fbx(
         for new_root_path, original_parent in zip(new_root_paths, original_parents):
             if original_parent:
                 cmds.parent(new_root_path, original_parent)
+
+    metadata_name = f"{prefix_shot}_metadata.json" if prefix_shot else "metadata.json"
+    metadata_path = os.path.join(export_path, metadata_name).replace("\\", "/")
+    with open(metadata_path, "w") as f:
+        json.dump(shot_metadata, f, indent=4)
+    print("metadata export path : ", metadata_path)
 
 
 def _unlock_all_attributes(node):
