@@ -445,6 +445,12 @@ def export_anim_camera(export_fbx_path):
     if constraints:
         cmds.delete(constraints)
 
+    child_transforms = (
+        cmds.listRelatives(cam_shot, children=True, type="transform", fullPath=True) or []
+    )
+    if child_transforms:
+        cmds.delete(child_transforms)
+
     _move_to_world([cam_shot])
 
     cam_render_name = "RenderCam"
