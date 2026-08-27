@@ -1,5 +1,26 @@
 # plugins/repo_internal/MayaPublisher/
 
+**2026-08-26: per-repo Ticket Visibility Setting tab.** This plugin has an
+UkoreHub-side UI again — one tab, Repository Setting > MayaPublisher >
+"Ticket Visibility" (`ticket_visibility_settings_page.py`,
+`CATEGORY_REPO`). It lists every bundled Ticket Script grouped by
+category and lets a studio admin uncheck the ones this repo's artists
+shouldn't see; unchecked names are written to
+`Repo.plugin_data["maya_publisher"]["hidden_tickets"]`
+(`{category: [script_name, ...]}`) via
+`MetadataStore.get_repo_plugin_data`/`set_repo_plugin_data` — inside the
+repo's own project blob (`data/projects/<id>.json`), so this is
+cloud-synced like everything else there, same convention
+`plugins/core/explorer/bookmarks_store.py` uses for bookmarks. Maya-side,
+`function.list_ticket_scripts()` now filters through
+`function.get_hidden_ticket_scripts()`, which reads that same
+`Repo.plugin_data` straight off disk (no live PluginAPI in Maya's
+process) the same way `PublishApi.repo_paths.get_custom_paths()`/
+`get_pipeline_refs()` already do — so a hidden script simply never
+appears in the Maya window's "Choose Ticket Scripts" list for that repo.
+Category visibility is unaffected — this only hides individual ticket
+scripts within a category, not whole categories.
+
 **2026-08-19: per-asset/shot block-name subfolder.** `publish()` now
 creates an extra subfolder between the ticket script's own folder and its
 version folder, named after the active scene's filename's first
@@ -32,9 +53,11 @@ tickets retired.** A repo used to pick **one** Publish Mode (Rig / Model /
 Animation) under Repository Setting > MayaPublisher, and tickets were
 JSON dicts (`publish_target`, `script_names`) managed via PublishApi's
 `ticket_manager_dialog.TicketManagerDialog`. Both are gone — see "Category
-+ Ticket Scripts (current design)" below for what replaced them. This
-plugin now has **no UkoreHub-side UI of its own** — everything happens in
-the Maya-side window.
++ Ticket Scripts (current design)" below for what replaced them. Category
+picking/creating/editing a Ticket Script all still happen entirely in the
+Maya-side window; the only UkoreHub-side UI this plugin has is the
+per-repo Ticket Visibility Setting tab added 2026-08-26 (see above), which
+only controls which of the already-bundled scripts a repo's artists see.
 
 ## Category + Ticket Scripts (current design)
 
@@ -87,18 +110,33 @@ the Maya-side window.
 - `manifest.json` — plugin id `maya_publisher`, entry point `plugin.py`.
 - `plugin.py` — `register(api)`: contributes `maya-scripts/` to the shared
   `maya_launcher_env_bridge` `PluginConfigStore` (same convention every
-  other Maya tool plugin here uses, e.g. `cache/plugins/PublishApi/plugin.py`)
-  — nothing else; no Settings tab, no `plugin_api`/`core`/`interface`
-  imports needed. Relies on `cache/plugins/MayaToolkit` (for
+  other Maya tool plugin here uses, e.g. `cache/plugins/PublishApi/plugin.py`),
+  and registers the `CATEGORY_REPO` "Ticket Visibility" Settings tab
+  (`_load_ticket_visibility_page_class` loads
+  `ticket_visibility_settings_page.py` by file path via
+  `importlib.util.spec_from_file_location`, not a normal import — see that
+  file's own docstring for why). Relies on `cache/plugins/MayaToolkit` (for
   `UkoreMaya.core.Pipeline`'s export functions — no longer imported by this
   plugin's own `function.py`, but still what a Ticket Script would
   typically call to actually export something) and `cache/plugins/PublishApi`
   (for path resolution/versioning) also being enabled — not imported
   directly, just expected on the same merged PYTHONPATH once Maya
   launches.
+- `ticket_visibility_settings_page.py` — the "Ticket Visibility" Settings
+  tab widget itself (`TicketVisibilitySettingsPage`, plain `PySide6`, no
+  `plugin_api`/`core`/`interface` imports — everything it needs is passed
+  in by `plugin.py`). Its own `_list_categories()`/`_list_ticket_scripts()`
+  are a separate copy of `function.py`'s tickets/ scan, not a shared import
+  — `function.py` imports `maya.cmds` at module level so it can't be
+  imported outside Maya, and the two live on different PYTHONPATHs anyway
+  (Maya only sees `maya-scripts/`, not this plugin's own root). See the
+  2026-08-26 changelog entry above for the storage format.
 - `maya-scripts/MayaPublisher/function.py` — `TOOL_ID = "maya_publisher"`.
   `list_categories()`/`list_ticket_scripts()`/`category_dir()`/
-  `script_path()`: read `tickets/` straight off disk. `create_ticket_script()`:
+  `script_path()`: read `tickets/` straight off disk.
+  `get_hidden_ticket_scripts(category)`: this repo's hidden-script names
+  for `category` (2026-08-26, see above) — `list_ticket_scripts()` filters
+  through it. `create_ticket_script()`:
   seeds a new Ticket Script from `_TICKET_SCRIPT_TEMPLATE`.
   `get_default_category()`/`set_default_category()`: this repo's
   `.MayaPublisher` file. `get_active_repo_display()`: `(repo_name,
