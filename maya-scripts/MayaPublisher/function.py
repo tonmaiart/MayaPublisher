@@ -119,13 +119,35 @@ def category_dir(category: str) -> Path:
     return tickets_root() / category
 
 
+def get_hidden_ticket_scripts(category: str) -> set[str]:
+    """Ticket Script names this repo has hidden via its UkoreHub-side
+    Repository Setting > MayaPublisher > "Ticket Visibility" tab
+    (ticket_visibility_settings_page.py, this plugin's own root — not
+    imported here, Maya only sees maya-scripts/). Reads Repo.plugin_data
+    straight off disk the same way get_pipeline_refs()/get_custom_paths()
+    in PublishApi.repo_paths do, since this Maya-side code has no live
+    PluginAPI to go through. Empty set if there's no active repo or
+    nothing's hidden for this category."""
+    _project, repo, _repo_path = repo_paths.get_active_repo()
+    if repo is None:
+        return set()
+    hidden_by_category = repo.plugin_data.get(TOOL_ID, {}).get("hidden_tickets", {})
+    return set(hidden_by_category.get(category, []))
+
+
 def list_ticket_scripts(category: str) -> list[str]:
-    """Every .py file's stem directly under tickets/<category>/, sorted —
-    these become the "Choose Ticket Scripts" list's rows."""
+    """Every .py file's stem directly under tickets/<category>/, sorted,
+    minus any this repo has hidden (get_hidden_ticket_scripts) — these
+    become the "Choose Ticket Scripts" list's rows."""
     folder = category_dir(category)
     if not folder.is_dir():
         return []
-    return sorted(p.stem for p in folder.iterdir() if p.suffix == ".py" and p.stem != "__init__")
+    hidden = get_hidden_ticket_scripts(category)
+    return sorted(
+        p.stem
+        for p in folder.iterdir()
+        if p.suffix == ".py" and p.stem != "__init__" and p.stem not in hidden
+    )
 
 
 def script_path(category: str, script_name: str) -> Path:
