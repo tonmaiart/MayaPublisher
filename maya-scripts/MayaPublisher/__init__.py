@@ -7,7 +7,8 @@ try:
             label="Maya Publisher...",
             category="General",
             command="from tmlib.core import File; File.launch('MayaPublisher')",
-            order=50,  # bottom of General — after Maya File Browser(10)/Save Increment(20)/Ukore Reference Editor(30)/Fix Sound Offset(40)
+            order=30,  # after Maya File Browser(10)/Ukore Reference Editor(20), divider follows
+            divider_after=True,
         )
     )
     registry.register_reload_handler(
