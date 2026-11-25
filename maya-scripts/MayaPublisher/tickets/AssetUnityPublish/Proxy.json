@@ -1,0 +1,7 @@
+{
+  "from_program": "Autodesk Maya",
+  "to_program": "Autodesk Maya",
+  "from_repo": "AssetTeam",
+  "to_repo": "PublishToUnity",
+  "batch_mode": "standalone"
+}

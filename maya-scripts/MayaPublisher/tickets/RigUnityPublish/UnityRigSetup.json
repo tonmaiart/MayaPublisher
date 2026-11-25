@@ -1,0 +1,7 @@
+{
+  "from_program": "Autodesk Maya",
+  "to_program": "Unity",
+  "from_repo": "RigTeam",
+  "to_repo": "PublishToUnity",
+  "batch_mode": "standalone"
+}

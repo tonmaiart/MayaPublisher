@@ -28,6 +28,21 @@ def _move_to_world(list_node):
             cmds.parent(node, world=True)
 
 
+def _force_set_attr(attr, value):
+    """Set attr even when the rig has locked it or driven it from a control
+    (e.g. a smooth-preview switch wired into displaySmoothMesh): unlock it,
+    break its incoming connection, then set the value."""
+
+    if cmds.getAttr(attr, lock=True):
+        cmds.setAttr(attr, lock=False)
+
+    source = cmds.listConnections(attr, source=True, destination=False, plugs=True)
+    if source:
+        cmds.disconnectAttr(source[0], attr)
+
+    cmds.setAttr(attr, value)
+
+
 def _remove_non_joint_descendants(root_joint):
     """Recheck root_joint's whole hierarchy and delete any node under it
     that isn't a joint (e.g. a leftover locator), so only the joint chain
@@ -186,7 +201,7 @@ def export_skeleton_mesh(export_path):
             shapes = cmds.listRelatives(mesh, shapes=True, fullPath=True) or []
             for shape in shapes:
                 if cmds.attributeQuery('displaySmoothMesh', node=shape, exists=True):
-                    cmds.setAttr(f'{shape}.displaySmoothMesh', 0)
+                    _force_set_attr(f'{shape}.displaySmoothMesh', 0)
 
         export_fbx_file_path = os.path.join(export_path, f"{key}.fbx").replace("\\", "/")
 

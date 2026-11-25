@@ -55,13 +55,9 @@ def validate(context):
         disable_segment_scale_compensate=True,
     )
 
-    # TEMP: wired in here only to exercise bake_texture_to_image_sequence()
-    # during a real publish while it's being built — pull this call out once
-    # the feature has its own ticket flow
-    bake_texture_to_image_sequence(
-        export_path=context["version_dir"],
-        material_name=BAKE_TEXTURE_TARGET_MATERIAL,
-    )
+    # bake_texture_to_image_sequence() is no longer called here (it needs a
+    # viewport for playblast, so this ticket couldn't run headless) — wire
+    # it into its own batch_mode "gui" ticket when that feature is ready.
 
     return result
 
@@ -527,6 +523,8 @@ def bake_texture_to_image_sequence(
     prefix="",
     debug_skip_playblast=False,
     debug_keep_temp_nodes=False,
+    use_subfolder=True,
+    display_lights="none",
 ):
     """Bake material_name's color output to a flipbook image sequence, one
     frame per frame of the current timeline.
@@ -550,6 +548,19 @@ def bake_texture_to_image_sequence(
     skips the playblast entirely (implies debug_keep_temp_nodes), so
     RenderPlane / tempBakeTextureCam stay in the scene for eyeballing the
     framing/alignment interactively. Returns None in this mode.
+
+    use_subfolder: when False, frames go straight into export_path as
+    "<prefix or material_name>.<frame>.png" instead of a per-material
+    subfolder — the flat "{Name}.{Frame}.png" layout Unity's Shot Importer
+    turns into a Texture2DArray (UnityShotFace uses this; names are already
+    unique per material there).
+
+    display_lights: the panel's Lighting mode during the playblast. "none"
+    is right for the flat surfaceShader plane itself (it ignores lights
+    either way), but anything the viewport renders *into* the color first
+    inherits it too — an LED face's offscreen capture of the eye rig
+    (LedFaceCapture) comes out pure black under "none"; UnityShotFace
+    passes "flat" for those.
 
     debug_keep_temp_nodes: when True, still runs the playblast as normal,
     but skips deleting RenderPlane / tempBakeTextureCam / the flat shader
@@ -668,7 +679,7 @@ def bake_texture_to_image_sequence(
 
         # own subfolder per material, so multiple baked materials don't dump
         # their sequences into the same folder and collide/mix frames
-        sequence_dir = os.path.join(export_path, material_name)
+        sequence_dir = os.path.join(export_path, material_name) if use_subfolder else export_path
         os.makedirs(sequence_dir, exist_ok=True)
 
         start_frame = cmds.playbackOptions(q=True, min=True)
@@ -711,8 +722,11 @@ def bake_texture_to_image_sequence(
         cmds.modelEditor(
             panel,
             edit=True,
-            displayLights="none",
+            displayLights=display_lights,
             displayAppearance="smoothShaded",
+            # the viewport's "Textured" toggle — off in a fresh panel, and with it off
+            # anything texture-driven (file textures, an LED face's capture) draws flat black
+            displayTextures=True,
             grid=False,
             hud=False,
             manipulators=False,
@@ -769,7 +783,10 @@ def bake_texture_to_image_sequence(
             if original_camera and cmds.objExists(original_camera):
                 cmds.lookThru(original_panel, original_camera)
             if original_state_string:
-                mel.eval(original_state_string)
+                # stateString is written against a "$editorName" variable it never
+                # declares — evaluated bare it fails ("undeclared variable") and the
+                # whole bake raises after the frames were already written
+                mel.eval(f'string $editorName = "{original_panel}"; {original_state_string}')
 
         if not keep_for_debug:
             for node in (temp_plane, temp_camera, flat_sg, flat_shader):

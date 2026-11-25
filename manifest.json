@@ -4,6 +4,6 @@
   "version": "1.0.0",
   "api_version": 1,
   "entry_point": "plugin.py",
-  "description": "Publishes the active Maya scene using a Ticket Script the artist picks from this tool's own bundled maya-scripts/MayaPublisher/tickets/<Category>/ folder, into the pipeline publish folder whose Custom Path label matches that category, versioned via PublishApi. Contributes its maya-scripts folder to the Maya Launcher env bridge — does not launch Maya itself and has no UkoreHub-side UI of its own.",
+  "description": "Publishes the active Maya scene using a Ticket Script the artist picks from this tool's own bundled maya-scripts/MayaPublisher/tickets/<Category>/ folder, into the pipeline publish folder whose Custom Path label matches that category, versioned via PublishApi. Its \"Maya Publisher\" section batch-publishes many scenes at once, running each in its own headless mayapy (or a Maya window for tickets that need a viewport) with the same env Maya Launcher uses. Also contributes its maya-scripts folder to the Maya Launcher env bridge.",
   "requires": ["maya_toolkit", "publish_api"]
 }

@@ -1,5 +1,330 @@
 # plugins/repo_internal/MayaPublisher/
 
+**2026-11-22: agent script request.** A request `{"script": "<file.py>",
+"args", "repo"}` to the same action runs one `mayapy <file.py>` with
+`resolve_maya_launch`'s env (+ `UKORE_MAYA_PLUGINS`, `UKORE_MAYA_PROJECT`)
+via `QProcess`; log `<request>.log`, status `state`/`exit_code`. Lets the
+agent fix scenes headless before a publish.
+
+**2026-11-22: agent batch (`maya_publisher_batch/agent_batch.py`).** The
+same headless queue the page runs, started from a request file instead of
+clicks, for UkoreHub's Agent Bridge (`file_action key=maya_publisher_agent_batch
+paths=[<request>.json]`). Request: `{"scenes", "category", "script_name",
+"parallel", "note", "repo"}`; it plans every scene with `plan_publish`
+against the active repo and queues nothing unless all plan cleanly, then
+uses `resolve_maya_launch` + `BatchQueue` (vNNN reserved per job, empty
+folder released on failure). Progress: `<request>.status.json` next to the
+request, rewritten on every job change (`state` running/done/rejected, per
+job status/version_dir/log_path). Registered as a `FileContextActionSpec`
+whose `match` is always False, so Explorer never shows it. First used for
+25 KafkaProj UnityShot publishes, 2 in parallel, all OK (about 1 min each).
+
+**2026-11-02: batch jobs failing with no result file — output fixes.** A
+real batch (UnityShot on KafkaProj shots) failed every job: the logs
+stopped right after "Read N files" and no `.result.json` was written.
+Found and fixed: under a QProcess pipe, mayapy's stdout is **cp1252**, so a
+ticket/tool printing `✔` (e.g. `tmlib.core.Validate`'s material messages)
+or Thai text **raised** mid-publish, and printing the traceback could raise
+again before the result was written. It is also **block-buffered**, so the
+lines before a failure never reached the log. Now:
+`batch_runner._setup_output()` switches stdout/stderr to UTF-8
+(`errors="replace"`) + line buffering, and enables `faulthandler`, so a hard
+crash dumps its Python stack into the log. `maya_env` also sets
+`PYTHONIOENCODING=utf-8:replace` and `PYTHONUNBUFFERED=1` for everything
+that prints earlier. `run_job` catches `BaseException` (a tool calling
+`sys.exit()`), and a failing traceback print can no longer stop the result
+being written. The queue now appends "Maya process ended: exit code …" to
+every log, and reports "Maya crashed (exit code 0xC…)" when it did. Verified
+with the real queue from a windowless process, 2 jobs in parallel, on
+KBA010/020/030: all published (KBA020/030 failed before the fix). 
+
+**Then the real crash: 0xC0000409 on repos enabling `dreamwall_picker`.**
+With the new exit-code reporting, the UkoreHub run showed every headless job
+aborting with `0xC0000409` right after `[UkoreReferenceEditor] [Dreamwall
+Picker] Searching Pickers`. Headless jobs used to run the launch hooks'
+`pre_open_mel`. That imports UkoreReferenceEditor, whose scene-open
+callback loads Dreamwall Picker's Qt UI, and with no UI in mayapy Qt aborts
+the process. It only happens when `dwpicker` is on PYTHONPATH (AnimatorTeam
+enables `dreamwall_picker`), which is why earlier tests passed.
+Reproduced with AnimatorTeam's exact plugin set. Fix: **headless jobs run
+no launch hooks** (`startup_mel: None` in `batch_queue`;
+`MayaLaunch.standalone_startup_mel()` removed). Hooks set up an artist's
+interactive Maya and add nothing a ticket needs; GUI jobs still get them.
+Re-verified with that plugin set: KBA010/020/030 all published, 2 in
+parallel.
+
+**Columns** in the queue, Diagnose and ticket lists are all `Interactive`
+now (`diagnose_tab.interactive_columns()`): drag a divider to resize,
+double-click it to fit, with sensible starting widths and no Stretch column
+(Qt won't let you drag one, and it squeezed Status). Rows being added no
+longer auto-resize columns over the user's widths.
+
+**2026-10-18: Diagnose References tab.** The queue now sits in a
+`QTabWidget` ("Publish Queue" | "Diagnose References"). The diagnose tab
+(`maya_publisher_batch/diagnose_tab.py`) lists, per queued scene, every
+reference it uses — namespace, file, its version, the latest version on
+disk, status **Latest / Outdated (n behind) / Missing / No version** — with
+a per-scene summary, an "Only outdated / missing" filter, and right-click
+Show in Explorer / Show Latest Version in Explorer / Open Folder / Copy
+Path (double-click = Show in Explorer). It rescans on a `QThread`
+(`background_threads` on the SectionSpec) whenever the tab is shown after
+the queue or repo changed, or via Rescan.
+
+`scene_refs.py` does the work without Maya: it reads only the `.ma` header
+(the `file -r` / `file -rdi N` commands before the first `createNode` —
+not the first `requires`: plugin requires like `fbxmaya` come before the
+references in real scenes), drops the duplicate `-rdi 1` line Maya writes for
+every top-level reference, and shows `-rdi 2+` as nested. Each path is
+resolved as absolute → project-relative (repo root) → scene-relative,
+`$ENV` vars expanded, a `{n}` copy-number suffix dropped, and if it's
+another machine's absolute path, re-rooted onto this workspace (shown in the
+tooltip). "Latest" is the highest number on disk next to the reference,
+for either convention: a `vNNN` **folder** (MayaPublisher's own publish
+layout — the latest file is the same name, the name with its version
+swapped, or the only file of that type in the newest folder) or a
+`_vNNN` **token in the file name** (work files; `prev002` doesn't count).
+Anything else is "No version". Publishing doesn't look at it.
+
+**Updating references (2026-11-02).** "Update All to Latest (n)" (top bar),
+right-click a scene > "Update Outdated in This Scene", or a reference >
+"Update to Latest" — confirmed first, refused while a batch is publishing,
+rescans afterwards. Only references `scene_refs.can_update()` allows:
+Outdated, top-level (a nested one comes from the referenced file — update
+that file), and whose latest is an actual file. `update_references()`
+rewrites **only** that reference node's `file -r` and `file -rdi 1` lines
+in the `.ma` text (path, `-typ` if the extension changed; a `{n}`
+copy-number suffix is kept) and drops the old file's `-rdi 2+` nested lines
+under it (Maya re-reads nested references from the new file on open).
+Every other byte, line endings included, is untouched; the write goes
+through a temp file + `os.replace`. New paths inside the repo are written
+**repo-relative** (`publish/...`, `path_for_scene()`), which Maya resolves
+against the project UkoreHub sets — so the scene stops depending on
+whichever machine/drive last saved it; paths outside the repo stay
+absolute. Verified on copies of real KafkaProj shots: Maya 2026 (mayapy)
+opened them with every updated reference loaded from the new version.
+
+**2026-10-18: scenes come from Explorer, `.ma` only.** The queue's Add
+Files... / Add Folder... buttons are gone. Instead `plugin.py` registers a
+`FileContextActionSpec` ("Add to Maya Publish Queue", new
+`api.register_file_context_action` in UkoreHub's plugin_api, added the same
+day) — right-click `.ma` file(s) or a folder row in Explorer (or empty
+space, for the current folder). It only shows when the active repo enables
+`maya_publisher`. A folder is scanned recursively when clicked. Rows get
+the ticket selected in the Maya Publisher page. Explorer stays on screen
+(no `navigate_and_focus` jump, by request): the status bar reports how many
+were added, and `MayaPublisherPage.browse_to_path()` pre-selects the first
+added row for when the artist switches over. The other direction: a queue
+row's right-click **Show in Explorer** switches to UkoreHub's Explorer
+(`navigate_and_focus("repo_browser", scene)`, via the `UICommandService`
+`plugin.py`'s `wire` hands the page as `page.ui_commands`) with that scene
+selected; "Open Scene Folder" still opens the OS file explorer. Drag-drop onto the queue still works. Only Maya
+ASCII (`.ma`) is ever queued (`SCENE_EXTENSIONS`) — `.mb` is ignored
+everywhere. On an older UkoreHub without that API the action just isn't
+registered (`hasattr` guard).
+
+**2026-10-18: batch publish presets.** The queue has a **Preset** bar
+(combo + Load / Save As... / Delete): a preset is a saved queue — every
+row's scene + ticket — plus the note, e.g. one per set of shots
+(`maya_publisher_batch/preset_store.py`). Presets are **per repo and shared
+with the whole team** (user's choice): stored in
+`Repo.plugin_data["maya_publisher"]["batch_presets"]` via
+`api.metadata.get_repo_plugin_data`/`set_repo_plugin_data`, so they're
+cloud-synced in the project blob. Scene paths are saved relative to the
+workspace root when possible, so a preset loads on any machine; a scene
+not on this machine yet still loads, as a "Can't publish: Scene file not
+found" row. Load asks Replace Queue / Add to Queue when the queue isn't
+empty; Save over an existing name and Delete both confirm (it affects
+everyone on the repo).
+
+**2026-10-18: batch publish, phase 3 — the "Maya Publisher" section.**
+`plugin.py` now registers a UkoreHub sidebar section (`SectionSpec` key
+`maya_publisher`, order 60, `SP_ArrowUp`) whose page is
+`maya_publisher_batch/batch_page.py` (`MayaPublisherPage`), plus
+`on_repo_changed` (re-plan rows) and `on_app_close` (kill running Maya
+jobs). `plugin.py` puts its own folder on `sys.path` like maya_launcher
+does, so the uniquely-named `maya_publisher_batch` package imports.
+
+- **Queue (left):** Add Files... / Add Folder... (recursive) / drag-drop
+  `.ma`/`.mb`. New rows get the ticket selected on the right; "Use Selected
+  Ticket" re-tickets the selected rows (or all). Columns File | Ticket |
+  Block | Destination | Status | Time. Rows are re-planned against the
+  active repo on every change, so "Can't publish: ..." and "same folder as
+  another row" show before Start. Right-click: Run Again, Open Scene/Publish
+  Folder, Open Log File, Remove. Double-click a published row opens its
+  `vNNN`.
+- **Tickets (right):** the old window's list (Ticket | From | From Repo |
+  To | To Repo, + Mode) with "Show match current repo", the `.md` step list,
+  and every right-click action (Edit Ticket... — `ticket_dialogs.py`, now
+  with Batch Mode —, Set/Clear Icon, Edit Script/Info, Open Ticket Dir, New
+  Ticket..., Open Tickets Dir). Program choices come straight from
+  `api.metadata.list_programs()` (names only — no program icons here yet).
+- **Note:** written to `note.txt` in every version the batch publishes.
+- **Run:** Start re-plans, confirms, resolves Maya (`maya_env`) and starts a
+  `BatchQueue` pinned to the current repo; Parallel = headless job limit
+  (GUI jobs always 1); "Keep GUI Maya open (debug)" leaves GUI jobs' Maya
+  open. Stop kills running jobs. The log pane shows the selected row's Maya
+  output live; a summary box appears if anything failed.
+
+**2026-10-18: batch publish, phase 2 (UkoreHub-side engine, no UI yet).**
+New package `maya_publisher_batch/` at the plugin root, running in
+UkoreHub's own process (imports only `plugin_api`/PySide6/stdlib).
+`plugin.py` doesn't use it yet — phase 3 adds the page:
+
+- `maya-scripts/MayaPublisher/ticket_store.py` — every pure tickets/ helper
+  (list/meta/info/icon paths/batch_mode/create) moved out of `function.py`,
+  which re-exports them. No Maya/PublishApi imports, so UkoreHub loads the
+  same file by path (`maya_publisher_batch/tickets.py`) — one
+  implementation for both sides.
+- `maya_env.py` — `resolve_maya_launch(api, project_id, repo)` ->
+  `MayaLaunch` (maya.exe, mayapy.exe next to it, env, plug-ins to
+  force-load, launch hooks). **Convention-only copy of
+  `cache/plugins/maya_launcher/plugin.py`'s recipe** (Software Linker exe +
+  pinned version, `maya_launcher_env_bridge` contributions filtered by the
+  repo's enabled + discovered tools, PublishApi always) — keep in sync.
+  Deliberate differences: drops `PYTHONHOME`/`PYTHONEXECUTABLE`/
+  `PYTHONSTARTUP`, always adds this plugin's `maya-scripts/` to
+  PYTHONPATH. Headless jobs run **no** launch hooks (changed 2026-11-02, see
+  the crash note at the top); GUI jobs get maya_launcher's full `-command`
+  MEL with `run_in_gui()` instead of opening a scene.
+- `publish_plan.py` — `plan_publish()` resolves block name, from_repo
+  check, Custom Path destination (repo + pipeline connections, read from
+  `Repo.plugin_data["project_editor"]` like `PublishApi.repo_paths`) and the
+  preview next version, all before Maya starts; `duplicate_destinations()`
+  flags two scenes landing in the same folder;
+  `reserve_version_dir()`/`release_version_dir()` create/remove `vNNN`.
+  Copies of the Maya-side rules — see its docstring for the pairs to keep
+  in sync.
+- `batch_queue.py` — `BatchQueue` (QObject): one `QProcess` per scene,
+  separate limits for standalone (default 2) and GUI (default 1) jobs,
+  per-mode timeouts, cancel/kill. Reserves each job's `vNNN` right before
+  starting it (so parallel jobs never race), removes it again if the job
+  fails/cancels and left it empty. Per job in
+  `<cache_dir>/maya_publisher_batch/<timestamp>/`: `.job.json`,
+  `.result.json` (source of truth), `.log`.
+
+**2026-10-18: batch publish, phase 1 (Maya side).** MayaPublisher is moving
+to a UkoreHub-side batch publish page (publish many scenes without opening
+each in Maya); the Maya window will be removed once that page exists. This
+phase adds the Maya-side half only — nothing in UkoreHub calls it yet:
+
+- `maya-scripts/MayaPublisher/batch_runner.py` publishes **one** scene per
+  Maya process from a job `.json` and writes a result `.json` (contract in
+  its module docstring). Two modes: headless `mayapy batch_runner.py --job
+  <job.json>`, or a real `maya.exe -command` window via `run_in_gui()` for a
+  ticket that needs a viewport. The scene is opened fresh and never saved.
+- `batch_guard.py` makes Maya's blocking dialogs unattended-safe:
+  `confirmDialog` is auto-answered with its defaultButton (recorded in the
+  result — e.g. `tmlib.core.Scene.clean_up_scene()`'s Yes/No in
+  RigToAnimPublish/Proxy), `inViewMessage` goes to the log, and
+  prompt/file/layout dialogs raise.
+- Each ticket's `.json` has a `batch_mode`: `"standalone"` (default) or
+  `"gui"` (`function.get_ticket_batch_mode()`). A `"gui"` ticket refuses to
+  run under headless mayapy. Every bundled ticket is `"standalone"` except
+  `AnimationUnityPublish/UnityShotFace` (`"gui"`, see 2026-11-02 below).
+- `function.publish()` takes an optional pre-created `version_dir`
+  (+`version`), so UkoreHub can resolve the destination and create every
+  `vNNN` itself before starting parallel jobs (no two jobs racing for the
+  same number). Without it, behavior is unchanged except that a failed
+  publish now removes the `vNNN` it created if the folder is still empty.
+- Snapshot thumbnail removed (button, `take_a_snapshot()`,
+  `thumbnail.jpg`) — no longer used.
+- UnityShot no longer calls the TEMP `bake_texture_to_image_sequence()`
+  (it playblasts, so the ticket couldn't run headless). The function is
+  still in the file for a future `"gui"` ticket.
+
+**2026-11-02: UnityShotFace (facial texture bake).** New `"gui"` ticket
+`tickets/AnimationUnityPublish/UnityShotFace.py`, published alongside
+UnityShot. It imports references and drops namespaces (UnityShot's
+`clean_up_scene()`), finds every material on a `*_Geo` mesh whose color
+input is animated (an animCurve or expression upstream, or a `file` node with
+Use Image Sequence on), and bakes each one with UnityShot's
+`bake_texture_to_image_sequence()`. The new `use_subfolder=False` argument
+writes flat `<material>.<frame>.png` files into its own
+`<animation_publish>/UnityShotFace/<shot>/vNNN/`. Unity's Shot Importer
+reads that folder as **Published Textures** and imports the latest bake with
+each shot as `{shot}_{material}` Texture2DArrays. UnityShot itself is
+unchanged and stays headless.
+
+**2026-10-11: flat ticket list + ticket icons.** The Maya window's
+category combo box (`comboBox_tickets_catagory`) is gone. `listWidget_ticket`
+now lists every ticket across all categories (`function.list_tickets()`),
+one row per `tickets/<Category>/<script>.py`, so picking a row picks
+exactly that ticket — there's no category-then-script two-step anymore.
+On disk nothing moved, and `<Category>` still resolves the publish root via
+its Custom Path label. Each ticket can have an icon at
+`tickets/<Category>/<script>.png` (`function.thumbnail_path()` /
+`set_ticket_thumbnail()`, scaled to 256px), set via the row's right-click
+menu (Set Icon from File... / Clear Icon).
+
+Each ticket also has a hand-written step list,
+`tickets/<Category>/<script>.md` (Markdown, numbered 1, 2, 3 …;
+`function.info_path()`/`get_ticket_info()`), shown in
+`textBrowser_ticket_info` under the ticket list for the selected ticket.
+Right-click > Edit Info... opens it (seeding it from a template if
+missing); New Ticket... seeds one too. **Keep it in sync by hand** when a
+script's steps change — nothing generates it from the code.
+
+The ticket group has **no button row** any more — every ticket action is
+in the right-click menu. Right-click a row: Edit Ticket... / Set Icon from
+File... / Clear Icon / Edit Script... / Open Ticket Dir.... Right-click the
+empty space below the rows: New Ticket... (creates
+`tickets/<Name>/<Name>.py`) / Open Tickets Dir.... The old "Refresh
+Scripts" rescan is folded into the top **Refresh** button. "Save Default"
+and the per-repo `.MayaPublisher` default file are gone — the first listed
+ticket is selected; an old `.MayaPublisher` file is ignored.
+
+The list is a `QTreeWidget` (`treeWidget_ticket`) with **Ticket | From |
+To** columns. From/To are per-ticket program names stored in
+`tickets/<Category>/<script>.json` (`{"from_program": ..., "to_program":
+...}`, `function.get_ticket_meta()`/`set_ticket_program()`), picked by
+double-clicking the cell (or right-click > Set From/To Program...) from
+the active Project's UkoreHub Program DB (`function.list_programs()` —
+`project.programs` via `PublishApi.repo_paths.get_active_repo()`, icons
+from `<UKOREHUB_DATA_DIR>/assets/program_icons/`). Stored by Program
+**name**, not id, since tickets are studio-wide but each Project has its
+own Program DB. An icon UkoreHub hasn't pulled to this machine yet shows
+as a letter tile. Both values are also passed to the Ticket Script as
+`context["from_program"]`/`context["to_program"]`.
+
+The same `.json` also holds an optional **From Repo / To Repo** (repo
+names), edited with right-click > **Edit Ticket...** (`TicketSettingsDialog`, which also edits
+From/To Program and has an "Open Script..." button; right-click > Edit
+Script... still opens the .py directly). `from_repo`: the ticket only
+works while that repo is active — otherwise its row is dimmed and Publish
+/ the destination preview refuse with a message
+(`function.check_ticket_from_repo()`). `to_repo`: only that repo's Custom
+Paths are searched for the ticket's label, instead of the first match
+across the active repo + pipeline connections; it must be the active repo
+or one of its pipeline connections. Both go through
+`function.get_publish_root_for_ticket()`, and are passed to the script as
+`context["from_repo"]`/`context["to_repo"]`. Unset = old behavior.
+
+Columns are **Ticket | From | From Repo | To | To Repo** (double-click a
+program cell to pick a program, a repo cell to open Edit Ticket...). Above the
+list, **Show match current repo** (`checkBox_show_match_repo`, checked in
+`ui.ui` and never persisted, so it's on every time the window opens) lists
+only tickets whose `from_repo` is the active repo or unset
+(`function.ticket_matches_active_repo()`); unchecking it shows every
+ticket, with non-matching ones dimmed.
+
+Window layout: two side-by-side groups. Left, **Choose Ticket**: an
+"Active Repo : <name> [📋] … [Refresh]" row (the old "Publish Metadata"
+group is gone — the repo path is no longer shown, only copied by
+`pushButton_copy_repo_path` / shown in the name's tooltip), the match
+checkbox, the ticket list and its buttons. Right, **Publish Info**:
+snapshot + version info, then "Target Publish Path" (`label_publish_root`,
+moved here), the note box and Publish. `label_publish_result` spans both
+underneath.
+
+**2026-10-11: Ticket Visibility Setting tab removed.** The per-repo
+"Ticket Visibility" tab below (`ticket_visibility_settings_page.py`,
+`get_hidden_ticket_scripts()`, `Repo.plugin_data["maya_publisher"]
+["hidden_tickets"]`) is gone — `plugin.py` no longer registers any
+Settings tab, and `list_ticket_scripts()` no longer filters. Each ticket's
+own `from_repo` + the "Show match current repo" filter replace it. Any
+`hidden_tickets` data still in a repo's plugin_data is simply ignored.
+The rest of this paragraph is history:
+
 **2026-08-26: per-repo Ticket Visibility Setting tab.** This plugin has an
 UkoreHub-side UI again — one tab, Repository Setting > MayaPublisher >
 "Ticket Visibility" (`ticket_visibility_settings_page.py`,

@@ -19,5 +19,5 @@ try:
             order=50,
         )
     )
-except ImportError:
+except Exception:  # no UkoreMenu, or no menus at all (headless mayapy — batch_runner.py)
     pass
